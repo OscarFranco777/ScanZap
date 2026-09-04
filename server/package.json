@@ -1,0 +1,14 @@
+{
+  "name": "inventario-pwa-server",
+  "version": "1.0.0",
+  "description": "Servidor proxy para Inventario ERPNext PWA",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "https-proxy-agent": "^7.0.2"
+  }
+}

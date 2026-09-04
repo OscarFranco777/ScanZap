@@ -1,0 +1,33 @@
+name: inventario_mobile
+description: "App de inventario con escáner de cámara para ERPNext"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  dio: ^5.7.0
+  dio_cookie_manager: ^3.1.1
+  cookie_jar: ^4.0.8
+  excel: ^4.0.6
+  shared_preferences: ^2.3.4
+  file_picker: ^8.1.7
+  mobile_scanner: ^5.2.3
+  permission_handler: ^11.3.1
+  share_plus: ^10.1.4
+  intl: ^0.20.2
+  path_provider: ^2.1.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
