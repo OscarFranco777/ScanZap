@@ -472,7 +472,7 @@ class ErpNextService {
   /// Hace submit de una Purchase Order borrador (docstatus 0 → 1).
   Future<Map<String, dynamic>> submitPurchaseOrder(String name) async {
     final response = await _dio.post(
-      '$baseUrl/api/method/frappe.client.submit_doc',
+      '$baseUrl/api/method/frappe.client.submit',
       data: {
         'doctype': 'Purchase Order',
         'name': name,
