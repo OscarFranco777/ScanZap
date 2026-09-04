@@ -73,7 +73,10 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
                   ),
                 ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.pushNamed(context, '/po-create'),
+        onPressed: () {
+          context.read<PurchaseOrderProvider>().clearCurrentOrder();
+          Navigator.pushNamed(context, '/po-create');
+        },
         icon: const Icon(Icons.add),
         label: const Text('Nueva Orden'),
       ),

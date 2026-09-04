@@ -471,18 +471,34 @@ class ErpNextService {
 
   /// Hace submit de una Purchase Order borrador (docstatus 0 → 1).
   Future<Map<String, dynamic>> submitPurchaseOrder(String name) async {
-    final response = await _dio.post(
-      '$baseUrl/api/method/frappe.client.submit',
-      data: {
-        'doctype': 'Purchase Order',
-        'name': name,
-      },
-    );
+    try {
+      final response = await _dio.post(
+        '$baseUrl/api/method/frappe.client.submit',
+        data: {
+          'doctype': 'Purchase Order',
+          'docname': name,
+        },
+      );
 
-    if (response.statusCode == 200) {
-      return response.data['data'] ?? {};
+      if (response.statusCode == 200) {
+        return response.data['data'] ?? {};
+      }
+      throw Exception('Error enviando orden: ${response.data}');
+    } on DioException catch (e) {
+      // Extraer el mensaje real del servidor
+      String serverMsg = '';
+      if (e.response?.data is Map) {
+        serverMsg = e.response?.data?['_server_messages'] ??
+            e.response?.data?['exc'] ??
+            e.response?.data?.toString() ?? '';
+      } else if (e.response?.data is String) {
+        serverMsg = e.response?.data ?? '';
+      }
+      if (serverMsg.isNotEmpty) {
+        throw Exception('Error ERPNext: $serverMsg');
+      }
+      throw Exception('Error HTTP ${e.response?.statusCode}: ${e.message}');
     }
-    throw Exception('Error enviando orden: ${response.data}');
   }
 
   /// Obtiene una Purchase Order por nombre.
