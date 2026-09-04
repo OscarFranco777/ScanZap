@@ -404,16 +404,14 @@ class ErpNextService {
   // ÓRDENES DE COMPRA
   // ══════════════════════════════════════════════════════════════
 
-  /// Crea una Purchase Order en ERPNext.
-  Future<Map<String, dynamic>> createPurchaseOrder({
+  /// Guarda una Purchase Order como borrador (docstatus=0) en ERPNext.
+  Future<Map<String, dynamic>> savePurchaseOrder({
     required String supplier,
     required String scheduleDate,
     required List<Map<String, dynamic>> items,
     String costCenter = '',
     String setWarehouse = '',
   }) async {
-    // Usamos scheduleDate para transaction_date también,
-    // así evitamos que la fecha del servidor difiera por zona horaria.
     final doc = {
       'doctype': 'Purchase Order',
       'supplier': supplier,
@@ -441,7 +439,50 @@ class ErpNextService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error creando orden: ${response.data}');
+    throw Exception('Error guardando borrador: ${response.data}');
+  }
+
+  /// Actualiza un borrador existente en ERPNext (agrega/modifica items).
+  Future<Map<String, dynamic>> updatePurchaseOrder({
+    required String name,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    final doc = {
+      'items': items
+          .map((item) => {
+                'doctype': 'Purchase Order Item',
+                'item_code': item['item_code'],
+                'qty': item['qty'],
+                'rate': item['rate'] ?? 0,
+              })
+          .toList(),
+    };
+
+    final response = await _dio.put(
+      '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(name)}',
+      data: doc,
+    );
+
+    if (response.statusCode == 200) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error actualizando borrador: ${response.data}');
+  }
+
+  /// Hace submit de una Purchase Order borrador (docstatus 0 → 1).
+  Future<Map<String, dynamic>> submitPurchaseOrder(String name) async {
+    final response = await _dio.post(
+      '$baseUrl/api/method/frappe.client.submit_doc',
+      data: {
+        'doctype': 'Purchase Order',
+        'name': name,
+      },
+    );
+
+    if (response.statusCode == 200) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error enviando orden: ${response.data}');
   }
 
   /// Obtiene una Purchase Order por nombre.

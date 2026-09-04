@@ -11,6 +11,10 @@ class PurchaseOrderProvider with ChangeNotifier {
   bool isLoading = false;
   String error = '';
 
+  // ─── Estado del guardado ───
+  bool isSaved = false; // true cuando el borrador ya está en ERPNext
+  bool isSubmitted = false; // true cuando fue enviado (submit)
+
   // ─── Orden actual (en edición) ───
   PurchaseOrder? currentOrder;
 
@@ -102,6 +106,9 @@ class PurchaseOrderProvider with ChangeNotifier {
       final data = await erpNextService.getPurchaseOrder(name);
       if (data != null) {
         currentOrder = PurchaseOrder.fromErp(data);
+        // Si ya tiene ID, está guardada; si docstatus=1, está enviada
+        isSaved = currentOrder!.id != null;
+        isSubmitted = currentOrder!.status == 'Enviada';
       } else {
         error = 'Orden no encontrada';
       }
@@ -220,8 +227,8 @@ class PurchaseOrderProvider with ChangeNotifier {
     await loadOrder(currentOrder!.id!);
   }
 
-  /// Envía la orden a ERPNext.
-  Future<bool> submitOrder() async {
+  /// Guarda la orden como borrador en ERPNext.
+  Future<bool> saveOrder() async {
     if (currentOrder == null || currentOrder!.items.isEmpty) {
       error = 'La orden está vacía';
       notifyListeners();
@@ -233,17 +240,76 @@ class PurchaseOrderProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final result = await erpNextService.createPurchaseOrder(
-        supplier: currentOrder!.supplierId.isNotEmpty ? currentOrder!.supplierId : currentOrder!.supplier,
-        scheduleDate: currentOrder!.scheduleDate.toIso8601String().substring(0, 10),
-        items: currentOrder!.items.map((item) => item.toMap()).toList(),
-        costCenter: currentOrder!.costCenter,
-        setWarehouse: currentOrder!.setWarehouse,
-      );
+      final supplier = currentOrder!.supplierId.isNotEmpty
+          ? currentOrder!.supplierId
+          : currentOrder!.supplier;
+      final dateStr = currentOrder!.scheduleDate.toIso8601String().substring(0, 10);
+      final items = currentOrder!.items.map((item) => item.toMap()).toList();
+
+      Map<String, dynamic> result;
+
+      if (isSaved && currentOrder!.id != null) {
+        // Actualizar borrador existente
+        result = await erpNextService.updatePurchaseOrder(
+          name: currentOrder!.id!,
+          items: items,
+        );
+      } else {
+        // Crear nuevo borrador
+        result = await erpNextService.savePurchaseOrder(
+          supplier: supplier,
+          scheduleDate: dateStr,
+          items: items,
+          costCenter: currentOrder!.costCenter,
+          setWarehouse: currentOrder!.setWarehouse,
+        );
+      }
 
       currentOrder!.id = result['name'];
       currentOrder!.status = 'Borrador';
       currentOrder!.grandTotal = result['grand_total']?.toDouble() ?? 0;
+      isSaved = true;
+
+      isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      error = 'Error guardando borrador: $e';
+      isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Hace submit de la orden (de borrador a enviada). Requiere que esté guardada.
+  Future<bool> submitOrder() async {
+    if (currentOrder == null) {
+      error = 'No hay orden para enviar';
+      notifyListeners();
+      return false;
+    }
+
+    if (!isSaved || currentOrder!.id == null) {
+      error = 'Primero guardá la orden como borrador';
+      notifyListeners();
+      return false;
+    }
+
+    if (currentOrder!.items.isEmpty) {
+      error = 'La orden no tiene items';
+      notifyListeners();
+      return false;
+    }
+
+    isLoading = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      await erpNextService.submitPurchaseOrder(currentOrder!.id!);
+
+      currentOrder!.status = 'Enviada';
+      isSubmitted = true;
 
       isLoading = false;
       notifyListeners();
@@ -259,6 +325,8 @@ class PurchaseOrderProvider with ChangeNotifier {
   /// Limpia la orden actual.
   void clearCurrentOrder() {
     currentOrder = null;
+    isSaved = false;
+    isSubmitted = false;
     lastScannedCode = '';
     lastScanMessage = '';
     notifyListeners();

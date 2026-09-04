@@ -175,8 +175,61 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     setState(() => _showForm = false);
   }
 
+  Future<void> _saveOrder() async {
+    final provider = context.read<PurchaseOrderProvider>();
+    final ok = await provider.saveOrder();
+
+    if (!mounted) return;
+
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('💾 Borrador guardado: ${provider.currentOrder?.id ?? ''}'),
+          backgroundColor: Colors.blue,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ ${provider.error}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _submitOrder() async {
     final provider = context.read<PurchaseOrderProvider>();
+
+    if (!provider.isSaved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Primero guardá la orden como borrador'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Confirmar antes de enviar
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enviar orden'),
+        content: const Text('¿Confirmás que querés enviar esta orden a ERPNext? No podrá modificarse después.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Enviar', style: TextStyle(color: Colors.green)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
     final ok = await provider.submitOrder();
 
     if (!mounted) return;
@@ -184,7 +237,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ Orden ${provider.currentOrder?.id ?? ''} creada'),
+          content: Text('✅ Orden ${provider.currentOrder?.id ?? ''} enviada'),
           backgroundColor: Colors.green,
         ),
       );
@@ -215,17 +268,28 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
           style: const TextStyle(fontSize: 16),
         ),
         actions: [
-          if (order?.id != null)
+          if (provider.isSubmitted)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.green[100],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle, size: 14, color: Colors.green[700]),
+                  const SizedBox(width: 4),
+                  Text('Enviada', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green[700])),
+                ],
+              ),
+            ),
+          if (order?.id != null && !provider.isSubmitted)
             IconButton(
               onPressed: () => provider.refreshOrder(),
               icon: const Icon(Icons.refresh),
               tooltip: 'Refrescar',
-            ),
-          if (order != null && order.items.isNotEmpty)
-            IconButton(
-              onPressed: _submitOrder,
-              icon: const Icon(Icons.send),
-              tooltip: 'Enviar a ERPNext',
             ),
         ],
       ),
@@ -403,8 +467,8 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
     return Column(
       children: [
-        // ─── CÁMARA ───
-        if (_cameraActive)
+        // ─── CÁMARA (solo si no fue enviada) ───
+        if (_cameraActive && !provider.isSubmitted)
           SizedBox(
             height: 180,
             child: Stack(
@@ -477,7 +541,8 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             ),
           ),
 
-        // ─── CONTROLES ───
+        // ─── CONTROLES (solo si no fue enviada) ───
+        if (!provider.isSubmitted)
         Container(
           color: Colors.blue[50],
           padding: const EdgeInsets.all(8),
@@ -629,32 +694,53 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 ),
         ),
 
-        // ─── BOTÓN ENVIAR ───
-        if (order.items.isNotEmpty)
+        // ─── BOTÓN ENVIAR / GUARDAR ───
+        if (order.items.isNotEmpty && !provider.isSubmitted)
           SafeArea(
             child: Container(
               padding: const EdgeInsets.all(8),
-              child: SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton.icon(
-                  onPressed: provider.isLoading ? null : _submitOrder,
-                  icon: provider.isLoading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                        )
-                      : const Icon(Icons.send),
-                  label: Text(
-                    provider.isLoading ? 'Enviando...' : 'Enviar Orden a ERPNext',
-                    style: const TextStyle(fontSize: 16),
+              child: Row(
+                children: [
+                  // Botón Guardar (borrador)
+                  Expanded(
+                    child: SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        onPressed: provider.isLoading ? null : _saveOrder,
+                        icon: provider.isLoading
+                            ? const SizedBox(
+                                width: 16, height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.save),
+                        label: Text(
+                          provider.isSaved ? 'Actualizar' : 'Guardar',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
+                  const SizedBox(width: 8),
+                  // Botón Enviar (submit)
+                  Expanded(
+                    child: SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        onPressed: (provider.isLoading || !provider.isSaved) ? null : _submitOrder,
+                        icon: const Icon(Icons.send),
+                        label: const Text('Enviar', style: TextStyle(fontSize: 14)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: provider.isSaved ? Colors.green : Colors.grey,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ),
@@ -664,9 +750,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
   Widget _buildItemCard(PurchaseOrderItem item, int index) {
     final provider = context.read<PurchaseOrderProvider>();
+    final readOnly = provider.isSubmitted;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      color: readOnly ? Colors.grey[50] : null,
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Row(
@@ -677,7 +765,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 children: [
                   Text(
                     item.itemName.isNotEmpty ? item.itemName : item.itemCode,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: readOnly ? Colors.grey[600] : null,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -689,33 +781,42 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 ],
               ),
             ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  onPressed: () => provider.updateItemQty(index, item.qty - 1),
-                  icon: const Icon(Icons.remove_circle_outline, size: 20),
-                  color: Colors.red,
-                  padding: const EdgeInsets.all(2),
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            if (readOnly)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Text(
+                  '${item.qty}',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-                Container(
-                  width: 36,
-                  alignment: Alignment.center,
-                  child: Text(
-                    '${item.qty}',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              )
+            else
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    onPressed: () => provider.updateItemQty(index, item.qty - 1),
+                    icon: const Icon(Icons.remove_circle_outline, size: 20),
+                    color: Colors.red,
+                    padding: const EdgeInsets.all(2),
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                   ),
-                ),
-                IconButton(
-                  onPressed: () => provider.updateItemQty(index, item.qty + 1),
-                  icon: const Icon(Icons.add_circle_outline, size: 20),
-                  color: Colors.green,
-                  padding: const EdgeInsets.all(2),
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                ),
-              ],
-            ),
+                  Container(
+                    width: 36,
+                    alignment: Alignment.center,
+                    child: Text(
+                      '${item.qty}',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => provider.updateItemQty(index, item.qty + 1),
+                    icon: const Icon(Icons.add_circle_outline, size: 20),
+                    color: Colors.green,
+                    padding: const EdgeInsets.all(2),
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  ),
+                ],
+              ),
           ],
         ),
       ),
