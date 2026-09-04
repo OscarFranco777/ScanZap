@@ -479,23 +479,25 @@ class ErpNextService {
           'docname': name,
         },
       );
-
       if (response.statusCode == 200) {
         return response.data['data'] ?? {};
       }
-      throw Exception('Error enviando orden: ${response.data}');
+      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
     } on DioException catch (e) {
       // Extraer el mensaje real del servidor
-      String serverMsg = '';
-      if (e.response?.data is Map) {
-        serverMsg = e.response?.data?['_server_messages'] ??
-            e.response?.data?['exc'] ??
-            e.response?.data?.toString() ?? '';
-      } else if (e.response?.data is String) {
-        serverMsg = e.response?.data ?? '';
+      String detail = '';
+      if (e.response?.data != null) {
+        if (e.response!.data is Map) {
+          detail = e.response!.data['exc'] ??
+              e.response!.data['_server_messages'] ??
+              e.response!.data['message'] ??
+              e.response!.data.toString();
+        } else {
+          detail = e.response!.data.toString();
+        }
       }
-      if (serverMsg.isNotEmpty) {
-        throw Exception('Error ERPNext: $serverMsg');
+      if (detail.isNotEmpty) {
+        throw Exception('Servidor: $detail');
       }
       throw Exception('Error HTTP ${e.response?.statusCode}: ${e.message}');
     }
