@@ -412,9 +412,12 @@ class ErpNextService {
     String costCenter = '',
     String setWarehouse = '',
   }) async {
+    // Usamos scheduleDate para transaction_date también,
+    // así evitamos que la fecha del servidor difiera por zona horaria.
     final doc = {
       'doctype': 'Purchase Order',
       'supplier': supplier,
+      'transaction_date': scheduleDate,
       'schedule_date': scheduleDate,
       'currency': 'HNL',
       if (costCenter.isNotEmpty) 'cost_center': costCenter,
