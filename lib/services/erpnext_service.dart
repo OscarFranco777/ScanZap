@@ -472,11 +472,22 @@ class ErpNextService {
   /// Hace submit de una Purchase Order borrador (docstatus 0 → 1).
   Future<Map<String, dynamic>> submitPurchaseOrder(String name) async {
     try {
+      // Paso 1: Obtener el documento completo
+      final docResponse = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(name)}',
+      );
+      if (docResponse.statusCode != 200 || docResponse.data?['data'] == null) {
+        throw Exception('No se pudo obtener la orden $name para enviar');
+      }
+      final Map<String, dynamic> doc = docResponse.data['data'];
+
+      // Paso 2: Enviar el documento completo a frappe.client.submit
       final response = await _dio.post(
         '$baseUrl/api/method/frappe.client.submit',
         data: {
           'doctype': 'Purchase Order',
           'docname': name,
+          'doc': doc,
         },
       );
       if (response.statusCode == 200) {
@@ -484,7 +495,6 @@ class ErpNextService {
       }
       throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
     } on DioException catch (e) {
-      // Extraer el mensaje real del servidor
       String detail = '';
       if (e.response?.data != null) {
         if (e.response!.data is Map) {
