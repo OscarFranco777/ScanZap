@@ -14,7 +14,8 @@ class PurchaseOrderDetailScreen extends StatefulWidget {
   const PurchaseOrderDetailScreen({super.key});
 
   @override
-  State<PurchaseOrderDetailScreen> createState() => _PurchaseOrderDetailScreenState();
+  State<PurchaseOrderDetailScreen> createState() =>
+      _PurchaseOrderDetailScreenState();
 }
 
 class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
@@ -184,7 +185,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('💾 Borrador guardado: ${provider.currentOrder?.id ?? ''}'),
+          content: Text(
+            '💾 Borrador guardado: ${provider.currentOrder?.id ?? ''}',
+          ),
           backgroundColor: Colors.blue,
           duration: const Duration(seconds: 2),
         ),
@@ -217,9 +220,14 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Enviar orden'),
-        content: const Text('¿Confirmás que querés enviar esta orden a ERPNext? No podrá modificarse después.'),
+        content: const Text(
+          '¿Confirmás que querés enviar esta orden a ERPNext? No podrá modificarse después.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Enviar', style: TextStyle(color: Colors.green)),
@@ -281,7 +289,14 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 children: [
                   Icon(Icons.check_circle, size: 14, color: Colors.green[700]),
                   const SizedBox(width: 4),
-                  Text('Enviada', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green[700])),
+                  Text(
+                    'Enviada',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green[700],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -306,7 +321,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(Icons.shopping_cart_checkout, size: 64, color: Theme.of(context).primaryColor),
+          Icon(
+            Icons.shopping_cart_checkout,
+            size: 64,
+            color: Theme.of(context).primaryColor,
+          ),
           const SizedBox(height: 16),
           Text(
             'Crear Orden de Compra',
@@ -344,9 +363,13 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   return ListTile(
                     dense: true,
                     title: Text(s['supplier_name'] ?? s['name'] ?? ''),
-                    subtitle: Text(s['name'] ?? '', style: const TextStyle(fontSize: 11)),
+                    subtitle: Text(
+                      s['name'] ?? '',
+                      style: const TextStyle(fontSize: 11),
+                    ),
                     onTap: () {
-                      _supplierController.text = s['supplier_name'] ?? s['name'] ?? '';
+                      _supplierController.text =
+                          s['supplier_name'] ?? s['name'] ?? '';
                       _selectedSupplierId = s['name'] ?? '';
                       setState(() => _supplierSuggestions = []);
                     },
@@ -384,7 +407,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   prefixIcon: Icon(Icons.warehouse),
                   border: OutlineInputBorder(),
                 ),
-                value: _selectedWarehouse.isNotEmpty ? _selectedWarehouse : null,
+                initialValue: _selectedWarehouse.isNotEmpty
+                    ? _selectedWarehouse
+                    : null,
                 hint: Text(
                   !loaded ? 'Cargando...' : 'Seleccioná un almacén',
                   style: TextStyle(color: Colors.grey[500]),
@@ -394,7 +419,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   final displayName = w['warehouse_name'] ?? name;
                   return DropdownMenuItem(
                     value: name,
-                    child: Text(displayName, style: const TextStyle(fontSize: 14)),
+                    child: Text(
+                      displayName,
+                      style: const TextStyle(fontSize: 14),
+                    ),
                   );
                 }).toList(),
                 onChanged: (val) {
@@ -416,7 +444,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   prefixIcon: Icon(Icons.account_balance),
                   border: OutlineInputBorder(),
                 ),
-                value: _selectedCostCenter.isNotEmpty ? _selectedCostCenter : null,
+                initialValue: _selectedCostCenter.isNotEmpty
+                    ? _selectedCostCenter
+                    : null,
                 hint: Text(
                   !loaded ? 'Cargando...' : 'Seleccioná un centro de costos',
                   style: TextStyle(color: Colors.grey[500]),
@@ -426,7 +456,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   final displayName = c['cost_center_name'] ?? name;
                   return DropdownMenuItem(
                     value: name,
-                    child: Text(displayName, style: const TextStyle(fontSize: 14)),
+                    child: Text(
+                      displayName,
+                      style: const TextStyle(fontSize: 14),
+                    ),
                   );
                 }).toList(),
                 onChanged: (val) {
@@ -491,13 +524,19 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                       alignment: Alignment.topCenter,
                       child: Container(
                         margin: const EdgeInsets.only(top: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
-                          color: (_scanLocked ? Colors.orange : Colors.blue).withOpacity(0.9),
+                          color: (_scanLocked ? Colors.orange : Colors.blue)
+                              .withOpacity(0.9),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Text(
-                          _scanLocked ? '⏳ Esperá...' : '📷 Escaneá un producto',
+                          _scanLocked
+                              ? '⏳ Esperá...'
+                              : '📷 Escaneá un producto',
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -543,96 +582,111 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
         // ─── CONTROLES (solo si no fue enviada) ───
         if (!provider.isSubmitted)
-        Container(
-          color: Colors.blue[50],
-          padding: const EdgeInsets.all(8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  SizedBox(
-                    width: 70,
-                    child: TextField(
-                      controller: _qtyController,
-                      keyboardType: TextInputType.number,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      decoration: const InputDecoration(
-                        labelText: 'Cant.',
-                        border: OutlineInputBorder(),
-                        filled: true,
-                        fillColor: Colors.white,
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          Container(
+            color: Colors.blue[50],
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 70,
+                      child: TextField(
+                        controller: _qtyController,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Cant.',
+                          border: OutlineInputBorder(),
+                          filled: true,
+                          fillColor: Colors.white,
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 10,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: TextField(
-                      controller: _scanController,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: const InputDecoration(
-                        labelText: 'Código',
-                        hintText: 'Escanear o escribir...',
-                        prefixIcon: Icon(Icons.qr_code_scanner, size: 18),
-                        border: OutlineInputBorder(),
-                        filled: true,
-                        fillColor: Colors.white,
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: _scanController,
+                        style: const TextStyle(fontSize: 13),
+                        decoration: const InputDecoration(
+                          labelText: 'Código',
+                          hintText: 'Escanear o escribir...',
+                          prefixIcon: Icon(Icons.qr_code_scanner, size: 18),
+                          border: OutlineInputBorder(),
+                          filled: true,
+                          fillColor: Colors.white,
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 8,
+                          ),
+                        ),
+                        onSubmitted: (v) {
+                          if (v.trim().isNotEmpty) _processScan(v);
+                        },
                       ),
-                      onSubmitted: (v) {
-                        if (v.trim().isNotEmpty) _processScan(v);
+                    ),
+                    const SizedBox(width: 6),
+                    IconButton(
+                      onPressed: () {
+                        setState(() => _cameraActive = !_cameraActive);
+                        if (_cameraActive) {
+                          _cameraController?.start();
+                        } else {
+                          _cameraController?.stop();
+                        }
                       },
+                      icon: Icon(
+                        _cameraActive ? Icons.camera_alt : Icons.keyboard,
+                      ),
+                      tooltip: _cameraActive ? 'Modo texto' : 'Modo cámara',
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.all(6),
+                        minimumSize: const Size(36, 36),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  IconButton(
-                    onPressed: () {
-                      setState(() => _cameraActive = !_cameraActive);
-                      if (_cameraActive) {
-                        _cameraController?.start();
-                      } else {
-                        _cameraController?.stop();
-                      }
-                    },
-                    icon: Icon(_cameraActive ? Icons.camera_alt : Icons.keyboard),
-                    tooltip: _cameraActive ? 'Modo texto' : 'Modo cámara',
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.all(6),
-                      minimumSize: const Size(36, 36),
-                    ),
-                  ),
-                ],
-              ),
-
-              // Último escaneo
-              if (provider.lastScannedCode.isNotEmpty)
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(top: 6),
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: provider.lastScanWasError ? Colors.red[50] : Colors.green[50],
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    provider.lastScanMessage,
-                    style: TextStyle(
-                      color: provider.lastScanWasError ? Colors.red[800] : Colors.green[800],
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
+                  ],
                 ),
-            ],
+
+                // Último escaneo
+                if (provider.lastScannedCode.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: provider.lastScanWasError
+                          ? Colors.red[50]
+                          : Colors.green[50],
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      provider.lastScanMessage,
+                      style: TextStyle(
+                        color: provider.lastScanWasError
+                            ? Colors.red[800]
+                            : Colors.green[800],
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+              ],
+            ),
           ),
-        ),
 
         // ─── INFO ORDEN ───
         Container(
@@ -644,7 +698,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               const SizedBox(width: 4),
               Text(
                 order.supplier,
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey[800]),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: Colors.grey[800],
+                ),
               ),
               const Spacer(),
               Text(
@@ -660,7 +718,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 ),
                 child: Text(
                   '${order.items.length} items — ${order.totalQty} uds',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange[800]),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange[800],
+                  ),
                 ),
               ),
             ],
@@ -676,7 +738,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.qr_code_scanner, size: 48, color: Colors.grey[300]),
+                      Icon(
+                        Icons.qr_code_scanner,
+                        size: 48,
+                        color: Colors.grey[300],
+                      ),
                       const SizedBox(height: 8),
                       Text(
                         'Escaneá productos para agregar',
@@ -709,8 +775,12 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         onPressed: provider.isLoading ? null : _saveOrder,
                         icon: provider.isLoading
                             ? const SizedBox(
-                                width: 16, height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
                               )
                             : const Icon(Icons.save),
                         label: Text(
@@ -730,11 +800,18 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     child: SizedBox(
                       height: 48,
                       child: ElevatedButton.icon(
-                        onPressed: (provider.isLoading || !provider.isSaved) ? null : _submitOrder,
+                        onPressed: (provider.isLoading || !provider.isSaved)
+                            ? null
+                            : _submitOrder,
                         icon: const Icon(Icons.send),
-                        label: const Text('Enviar', style: TextStyle(fontSize: 14)),
+                        label: const Text(
+                          'Enviar',
+                          style: TextStyle(fontSize: 14),
+                        ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: provider.isSaved ? Colors.green : Colors.grey,
+                          backgroundColor: provider.isSaved
+                              ? Colors.green
+                              : Colors.grey,
                           foregroundColor: Colors.white,
                         ),
                       ),
@@ -786,7 +863,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Text(
                   '${item.qty}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               )
             else
@@ -794,26 +874,37 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    onPressed: () => provider.updateItemQty(index, item.qty - 1),
+                    onPressed: () =>
+                        provider.updateItemQty(index, item.qty - 1),
                     icon: const Icon(Icons.remove_circle_outline, size: 20),
                     color: Colors.red,
                     padding: const EdgeInsets.all(2),
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    constraints: const BoxConstraints(
+                      minWidth: 28,
+                      minHeight: 28,
+                    ),
                   ),
                   Container(
                     width: 36,
                     alignment: Alignment.center,
                     child: Text(
                       '${item.qty}',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   IconButton(
-                    onPressed: () => provider.updateItemQty(index, item.qty + 1),
+                    onPressed: () =>
+                        provider.updateItemQty(index, item.qty + 1),
                     icon: const Icon(Icons.add_circle_outline, size: 20),
                     color: Colors.green,
                     padding: const EdgeInsets.all(2),
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    constraints: const BoxConstraints(
+                      minWidth: 28,
+                      minHeight: 28,
+                    ),
                   ),
                 ],
               ),
