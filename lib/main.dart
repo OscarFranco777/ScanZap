@@ -32,6 +32,7 @@ class InventarioApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        Provider.value(value: erpNextService),
         ChangeNotifierProvider(
           create: (_) => InventoryProvider(erpNextService: erpNextService),
         ),

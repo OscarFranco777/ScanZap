@@ -881,4 +881,193 @@ class ErpNextService {
       return [];
     }
   }
+
+  // ══════════════════════════════════════════════════════════════
+  // PURCHASE RECEIPT
+  // ══════════════════════════════════════════════════════════════
+
+  /// Obtiene el detalle completo de una Purchase Order (para crear PR).
+  Future<Map<String, dynamic>?> getPurchaseOrderDetail(String poName) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(poName)}',
+      );
+      if (response.statusCode == 200) {
+        return response.data?['data'];
+      }
+      return null;
+    } catch (e) {
+      print('[Service] getPurchaseOrderDetail error: $e');
+      return null;
+    }
+  }
+
+  /// Obtiene las naming_series disponibles para Purchase Receipt.
+  Future<List<String>> fetchPurchaseReceiptNamingSeries() async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.desk.form.load.getdoctype',
+        queryParameters: {'doctype': 'Purchase Receipt'},
+      );
+      if (response.statusCode == 200) {
+        final docs = response.data?['docs'];
+        if (docs is List && docs.isNotEmpty) {
+          for (final doc in docs) {
+            if (doc is Map && doc['name'] == 'Purchase Receipt') {
+              if (doc['naming_series'] != null) {
+                return List<String>.from(doc['naming_series']);
+              }
+            }
+          }
+        }
+      }
+      return [];
+    } catch (e) {
+      print('[Service] fetchPurchaseReceiptNamingSeries error: $e');
+      return [];
+    }
+  }
+
+  /// Crea un Purchase Receipt como borrador desde una PO.
+  Future<Map<String, dynamic>> createPurchaseReceipt({
+    required String purchaseOrder,
+    required String supplier,
+    required String warehouse,
+    required List<Map<String, dynamic>> items,
+    String? namingSeries,
+    String? costCenter,
+  }) async {
+    final doc = {
+      'doctype': 'Purchase Receipt',
+      'supplier': supplier,
+      'set_warehouse': warehouse,
+      'posting_date': DateTime.now().toIso8601String().substring(0, 10),
+      if (namingSeries != null && namingSeries.isNotEmpty)
+        'naming_series': namingSeries,
+      if (costCenter != null && costCenter.isNotEmpty)
+        'cost_center': costCenter,
+      'items': items
+          .map((item) => {
+                'doctype': 'Purchase Receipt Item',
+                'item_code': item['item_code'],
+                'qty': item['qty'],
+                'warehouse': warehouse,
+                'purchase_order': purchaseOrder,
+                'purchase_order_item': item['purchase_order_item'],
+                if (item['uom'] != null) 'uom': item['uom'],
+                if (item['rate'] != null) 'rate': item['rate'],
+              })
+          .toList(),
+    };
+
+    final response = await _dio.post(
+      '$baseUrl/api/resource/Purchase%20Receipt',
+      data: doc,
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error creando Purchase Receipt: ${response.data}');
+  }
+
+  /// Actualiza un Purchase Receipt borrador existente.
+  Future<Map<String, dynamic>> updatePurchaseReceipt({
+    required String name,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    final doc = {
+      'items': items
+          .map((item) => {
+                'doctype': 'Purchase Receipt Item',
+                'item_code': item['item_code'],
+                'qty': item['qty'],
+                'warehouse': item['warehouse'],
+                if (item['purchase_order'] != null)
+                  'purchase_order': item['purchase_order'],
+                if (item['purchase_order_item'] != null)
+                  'purchase_order_item': item['purchase_order_item'],
+                if (item['uom'] != null) 'uom': item['uom'],
+                if (item['rate'] != null) 'rate': item['rate'],
+              })
+          .toList(),
+    };
+
+    final response = await _dio.put(
+      '$baseUrl/api/resource/Purchase%20Receipt/${Uri.encodeComponent(name)}',
+      data: doc,
+    );
+
+    if (response.statusCode == 200) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error actualizando Purchase Receipt: ${response.data}');
+  }
+
+  /// Hace submit de un Purchase Receipt.
+  Future<Map<String, dynamic>> submitPurchaseReceipt(String name) async {
+    try {
+      final docResponse = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Receipt/${Uri.encodeComponent(name)}',
+      );
+      if (docResponse.statusCode != 200 || docResponse.data?['data'] == null) {
+        throw Exception('No se pudo obtener el PR $name para enviar');
+      }
+      final Map<String, dynamic> doc = docResponse.data['data'];
+
+      final response = await _dio.post(
+        '$baseUrl/api/method/frappe.client.submit',
+        data: {
+          'doctype': 'Purchase Receipt',
+          'docname': name,
+          'doc': doc,
+        },
+      );
+      if (response.statusCode == 200) {
+        return response.data['data'] ?? {};
+      }
+      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+    } on DioException catch (e) {
+      String detail = '';
+      if (e.response?.data != null) {
+        if (e.response!.data is Map) {
+          detail = e.response!.data['exc'] ??
+              e.response!.data['_server_messages'] ??
+              e.response!.data['message'] ??
+              e.response!.data.toString();
+        } else {
+          detail = e.response!.data.toString();
+        }
+      }
+      if (detail.isNotEmpty) {
+        throw Exception('Servidor: $detail');
+      }
+      throw Exception('Error HTTP ${e.response?.statusCode}: ${e.message}');
+    }
+  }
+
+  /// Lista Purchase Receipts existentes.
+  Future<List<Map<String, dynamic>>> listPurchaseReceipts({
+    int limit = 50,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Purchase Receipt',
+          'fields': '["name","supplier","posting_date","docstatus","grand_total"]',
+          'order_by': 'creation desc',
+          'limit_page_length': limit,
+        },
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('[Service] listPurchaseReceipts error: $e');
+      return [];
+    }
+  }
 }

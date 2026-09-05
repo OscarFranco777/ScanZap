@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../providers/inventory_provider.dart';
 import '../providers/purchase_order_provider.dart';
+import '../services/erpnext_service.dart';
 import '../models/purchase_order.dart';
 
 /// Pantalla de creación y detalle de Orden de Compra.
@@ -40,6 +41,24 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   String _selectedCostCenter = '';
   String _selectedNamingSeries = '';
 
+  // ─── Purchase Receipt (recepción desde PO) ───
+  bool _showPRForm = false;
+  bool _prLoading = false;
+  String _prError = '';
+  List<Map<String, dynamic>> _prItems = [];
+  String _prWarehouse = '';
+  String _prNamingSeries = '';
+  List<String> _prNamingSeriesOptions = [];
+  bool _prScannerActive = false;
+  MobileScannerController? _prCameraController;
+  final _prScanController = TextEditingController();
+  final _prQtyController = TextEditingController(text: '1');
+  bool _prScanLocked = false;
+  String _prLastScannedCode = '';
+  Timer? _prLockTimer;
+  bool _prSaved = false;
+  String _prSavedName = '';
+
   @override
   void initState() {
     super.initState();
@@ -60,10 +79,14 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   @override
   void dispose() {
     _cameraController?.dispose();
+    _prCameraController?.dispose();
     _lockTimer?.cancel();
+    _prLockTimer?.cancel();
     _supplierController.dispose();
     _scanController.dispose();
     _qtyController.dispose();
+    _prScanController.dispose();
+    _prQtyController.dispose();
     super.dispose();
   }
 
@@ -271,6 +294,210 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════
+  // PURCHASE RECEIPT (recepción desde PO)
+  // ══════════════════════════════════════════════════════════════
+
+  /// Abre el formulario de creación de Purchase Receipt desde la PO.
+  Future<void> _openPRForm() async {
+    final provider = context.read<PurchaseOrderProvider>();
+    final order = provider.currentOrder;
+    if (order == null || order.id == null) return;
+
+    setState(() {
+      _showPRForm = true;
+      _prLoading = true;
+      _prError = '';
+      _prItems = [];
+      _prWarehouse = order.setWarehouse;
+      _prSaved = false;
+      _prSavedName = '';
+    });
+
+    try {
+      final service = context.read<ErpNextService>();
+
+      // Obtener detalle de la PO y naming series en paralelo
+      final results = await Future.wait([
+        service.getPurchaseOrderDetail(order.id!),
+        service.fetchPurchaseReceiptNamingSeries(),
+      ]);
+
+      final poDetail = results[0] as Map<String, dynamic>?;
+      final series = results[1] as List<String>;
+
+      if (poDetail != null && poDetail['items'] != null) {
+        final items = List<Map<String, dynamic>>.from(poDetail['items']);
+        _prItems = items.map((item) => {
+          'item_code': item['item_code'] ?? '',
+          'item_name': item['item_name'] ?? '',
+          'qty': item['qty'] ?? 0,
+          'received_qty': item['received_qty'] ?? 0,
+          'uom': item['uom'] ?? 'Unidad',
+          'rate': item['rate'] ?? 0,
+          'purchase_order_item': item['name'] ?? '',
+        }).toList();
+      }
+
+      _prNamingSeriesOptions = series;
+      if (series.isNotEmpty) _prNamingSeries = series.first;
+    } catch (e) {
+      _prError = 'Error cargando datos: $e';
+    }
+
+    setState(() => _prLoading = false);
+  }
+
+  /// Procesa un escaneo en el formulario de PR.
+  void _onPRBarcodeDetected(BarcodeCapture capture) {
+    if (_prScanLocked) return;
+    final barcode = capture.barcodes.firstOrNull;
+    if (barcode == null || barcode.rawValue == null) return;
+
+    final code = barcode.rawValue!.trim();
+    if (code.isEmpty || code == _prLastScannedCode) return;
+
+    _prScanLocked = true;
+    _prLastScannedCode = code;
+    _prCameraController?.stop();
+    _processPRScan(code);
+  }
+
+  void _processPRScan(String code) {
+    if (code.trim().isEmpty) return;
+    HapticFeedback.mediumImpact();
+
+    final qty = int.tryParse(_prQtyController.text.trim()) ?? 1;
+    final cleanCode = code.trim().toUpperCase();
+
+    // Buscar si ya está en la lista
+    final existingIndex = _prItems.indexWhere(
+      (i) => (i['item_code'] ?? '').toString().toUpperCase() == cleanCode,
+    );
+
+    if (existingIndex >= 0) {
+      _prItems[existingIndex]['qty'] =
+          (_prItems[existingIndex]['qty'] ?? 0) + qty;
+    } else {
+      _prItems.add({
+        'item_code': cleanCode,
+        'item_name': cleanCode,
+        'qty': qty,
+        'received_qty': 0,
+        'uom': 'Unidad',
+        'rate': 0,
+        'purchase_order_item': '',
+      });
+    }
+
+    _prQtyController.text = '1';
+    _prScanController.clear();
+    setState(() {});
+
+    _prLockTimer?.cancel();
+    _prLockTimer = Timer(const Duration(seconds: 2), () {
+      _prScanLocked = false;
+      _prLastScannedCode = '';
+      if (_prScannerActive && mounted) {
+        _prCameraController?.start();
+      }
+    });
+  }
+
+  /// Guarda el Purchase Receipt como borrador.
+  Future<void> _savePR() async {
+    if (_prItems.isEmpty) {
+      setState(() => _prError = 'No hay items para recibir');
+      return;
+    }
+
+    final provider = context.read<PurchaseOrderProvider>();
+    final order = provider.currentOrder;
+    if (order?.id == null) return;
+
+    setState(() {
+      _prLoading = true;
+      _prError = '';
+    });
+
+    try {
+      final service = context.read<ErpNextService>();
+      final result = await service.createPurchaseReceipt(
+        purchaseOrder: order!.id!,
+        supplier: order.supplierId.isNotEmpty ? order.supplierId : order.supplier,
+        warehouse: _prWarehouse.isNotEmpty ? _prWarehouse : order.setWarehouse,
+        items: _prItems,
+        namingSeries: _prNamingSeries,
+        costCenter: order.costCenter,
+      );
+
+      _prSavedName = result['name'] ?? '';
+      _prSaved = true;
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('💾 Borrador guardado: $_prSavedName'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      }
+    } catch (e) {
+      _prError = 'Error guardando: $e';
+    }
+
+    setState(() => _prLoading = false);
+  }
+
+  /// Envía el Purchase Receipt.
+  Future<void> _submitPR() async {
+    if (!_prSaved || _prSavedName.isEmpty) {
+      setState(() => _prError = 'Primero guardá el borrador');
+      return;
+    }
+
+    setState(() {
+      _prLoading = true;
+      _prError = '';
+    });
+
+    try {
+      final service = context.read<ErpNextService>();
+      await service.submitPurchaseReceipt(_prSavedName);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Recepción $_prSavedName enviada'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        setState(() {
+          _showPRForm = false;
+          _prSaved = false;
+          _prSavedName = '';
+        });
+      }
+    } catch (e) {
+      _prError = 'Error enviando: $e';
+    }
+
+    setState(() => _prLoading = false);
+  }
+
+  /// Cierra el formulario de PR.
+  void _closePRForm() {
+    _prCameraController?.stop();
+    setState(() {
+      _showPRForm = false;
+      _prScannerActive = false;
+      _prItems = [];
+      _prError = '';
+      _prSaved = false;
+      _prSavedName = '';
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════
   // UI
   // ══════════════════════════════════════════════════════════════
 
@@ -396,7 +623,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     vertical: 10,
                   ),
                 ),
-                initialValue: (series.contains(_selectedNamingSeries))
+                value: (series.contains(_selectedNamingSeries))
                     ? _selectedNamingSeries
                     : series.first,
                 icon: const Icon(Icons.arrow_drop_down, size: 20),
@@ -515,7 +742,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     vertical: 10,
                   ),
                 ),
-                initialValue: _selectedWarehouse.isNotEmpty
+                value: _selectedWarehouse.isNotEmpty
                     ? _selectedWarehouse
                     : null,
                 hint: Text(
@@ -564,7 +791,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     vertical: 10,
                   ),
                 ),
-                initialValue: _selectedCostCenter.isNotEmpty
+                value: _selectedCostCenter.isNotEmpty
                     ? _selectedCostCenter
                     : null,
                 hint: Text(
@@ -621,6 +848,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
     if (order == null) {
       return const Center(child: Text('Orden no disponible'));
+    }
+
+    // ─── Si se está creando una recepción, mostrar formulario PR ───
+    if (_showPRForm) {
+      return _buildPRForm(order);
     }
 
     return Column(
@@ -946,6 +1178,367 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               ),
             ),
           ),
+
+        // ─── BOTÓN CREAR RECEPCIÓN (solo si la PO fue enviada) ───
+        if (provider.isSubmitted)
+          SafeArea(
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              child: SizedBox(
+                height: 48,
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _prLoading ? null : _openPRForm,
+                  icon: _prLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.local_shipping),
+                  label: const Text(
+                    'Crear Recepción de Mercadería',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Formulario inline de creación de Purchase Receipt.
+  Widget _buildPRForm(PurchaseOrder order) {
+    return Column(
+      children: [
+        // ─── HEADER ───
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          color: Colors.teal[50],
+          child: Row(
+            children: [
+              Icon(Icons.local_shipping, size: 18, color: Colors.teal[700]),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _prSaved ? '📝 Borrador: $_prSavedName' : 'Nueva Recepción de Mercadería',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: Colors.teal[800],
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: _closePRForm,
+                icon: const Icon(Icons.close, size: 20),
+                tooltip: 'Cerrar',
+              ),
+            ],
+          ),
+        ),
+
+        // ─── SCANNER (solo si se activó) ───
+        if (_prScannerActive)
+          SizedBox(
+            height: 150,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (_prCameraController != null)
+                  MobileScanner(
+                    controller: _prCameraController!,
+                    onDetect: _onPRBarcodeDetected,
+                  ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _prScannerActive = false;
+                        _prCameraController?.stop();
+                      });
+                    },
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: const BoxDecoration(
+                        color: Colors.black54,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.close, size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 4,
+                  left: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _prScanLocked ? '⏳ Esperá...' : '📷 Escaneá producto',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // ─── CONTROLES ───
+        Container(
+          color: Colors.teal[50],
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            children: [
+              // Toggle cámara
+              IconButton(
+                onPressed: () {
+                  setState(() {
+                    _prScannerActive = !_prScannerActive;
+                    if (_prScannerActive) {
+                      _prCameraController = MobileScannerController(
+                        detectionSpeed: DetectionSpeed.noDuplicates,
+                        facing: CameraFacing.back,
+                        torchEnabled: false,
+                      );
+                    } else {
+                      _prCameraController?.stop();
+                      _prCameraController?.dispose();
+                      _prCameraController = null;
+                    }
+                  });
+                },
+                icon: Icon(_prScannerActive ? Icons.camera_alt : Icons.qr_code_scanner),
+                tooltip: _prScannerActive ? 'Cerrar escáner' : 'Abrir escáner',
+                style: IconButton.styleFrom(
+                  backgroundColor: _prScannerActive ? Colors.orange : Colors.teal,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 4),
+              // Cantidad
+              SizedBox(
+                width: 55,
+                child: TextField(
+                  controller: _prQtyController,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  decoration: const InputDecoration(
+                    labelText: 'Cant.',
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.white,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              // Código manual
+              Expanded(
+                child: TextField(
+                  controller: _prScanController,
+                  style: const TextStyle(fontSize: 13),
+                  decoration: const InputDecoration(
+                    labelText: 'Código manual',
+                    hintText: 'Escribir código...',
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.white,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                  ),
+                  onSubmitted: (v) {
+                    if (v.trim().isNotEmpty) _processPRScan(v);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // ─── INFORMACIÓN ───
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          color: Colors.grey[100],
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, size: 14, color: Colors.grey[600]),
+              const SizedBox(width: 4),
+              Text(
+                'PO: ${order.id ?? ""} — ${order.supplier}',
+                style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+              ),
+              const Spacer(),
+              Text(
+                '${_prItems.length} items',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal[700]),
+              ),
+            ],
+          ),
+        ),
+
+        const Divider(height: 1),
+
+        // ─── LISTA DE ITEMS ───
+        Expanded(
+          child: _prItems.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.inbox_outlined, size: 48, color: Colors.grey[300]),
+                      const SizedBox(height: 8),
+                      Text('No hay items', style: TextStyle(color: Colors.grey[500])),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  itemCount: _prItems.length,
+                  itemBuilder: (context, index) {
+                    final item = _prItems[index];
+                    final pending = (item['qty'] ?? 0) - (item['received_qty'] ?? 0);
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    (item['item_name'] ?? item['item_code'] ?? '').toString(),
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${item["item_code"]} — Pedido: ${item["qty"]} — Pendiente: $pending',
+                                    style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  onPressed: () {
+                                    final newQty = (_prItems[index]['qty'] ?? 0) - 1;
+                                    if (newQty <= 0) {
+                                      setState(() => _prItems.removeAt(index));
+                                    } else {
+                                      setState(() => _prItems[index]['qty'] = newQty);
+                                    }
+                                  },
+                                  icon: const Icon(Icons.remove_circle_outline, size: 20),
+                                  color: Colors.red,
+                                  padding: const EdgeInsets.all(2),
+                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                ),
+                                Container(
+                                  width: 36,
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    '${_prItems[index]["qty"]}',
+                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () {
+                                    setState(() => _prItems[index]['qty'] = (_prItems[index]['qty'] ?? 0) + 1);
+                                  },
+                                  icon: const Icon(Icons.add_circle_outline, size: 20),
+                                  color: Colors.green,
+                                  padding: const EdgeInsets.all(2),
+                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+
+        // ─── ERROR ───
+        if (_prError.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            color: Colors.red[50],
+            child: Text(
+              _prError,
+              style: TextStyle(color: Colors.red[700], fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+          ),
+
+        // ─── BOTONES GUARDAR / ENVIAR ───
+        SafeArea(
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: _prLoading || _prItems.isEmpty ? null : _savePR,
+                      icon: _prLoading
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.save),
+                      label: Text(_prSaved ? 'Actualizar' : 'Guardar', style: const TextStyle(fontSize: 14)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: _prLoading || !_prSaved ? null : _submitPR,
+                      icon: const Icon(Icons.send),
+                      label: const Text('Enviar', style: TextStyle(fontSize: 14)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _prSaved ? Colors.green : Colors.grey,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
