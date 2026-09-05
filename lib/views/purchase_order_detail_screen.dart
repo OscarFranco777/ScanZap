@@ -8,6 +8,7 @@ import '../providers/inventory_provider.dart';
 import '../providers/purchase_order_provider.dart';
 import '../services/erpnext_service.dart';
 import '../models/purchase_order.dart';
+import 'purchase_receipt_detail_screen.dart';
 
 /// Pantalla de creación y detalle de Orden de Compra.
 /// Incluye escáner de cámara y entrada manual.
@@ -421,16 +422,27 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
     try {
       final service = context.read<ErpNextService>();
-      final result = await service.createPurchaseReceipt(
-        purchaseOrder: order!.id!,
-        supplier: order.supplierId.isNotEmpty ? order.supplierId : order.supplier,
-        warehouse: _prWarehouse.isNotEmpty ? _prWarehouse : order.setWarehouse,
-        items: _prItems,
-        namingSeries: _prNamingSeries,
-        costCenter: order.costCenter,
-      );
+      Map<String, dynamic> result;
 
-      _prSavedName = result['name'] ?? '';
+      if (_prSaved && _prSavedName.isNotEmpty) {
+        // Ya existe un borrador — actualizar
+        result = await service.updatePurchaseReceipt(
+          name: _prSavedName,
+          items: _prItems,
+        );
+      } else {
+        // Crear nuevo borrador
+        result = await service.createPurchaseReceipt(
+          purchaseOrder: order!.id!,
+          supplier: order.supplierId.isNotEmpty ? order.supplierId : order.supplier,
+          warehouse: _prWarehouse.isNotEmpty ? _prWarehouse : order.setWarehouse,
+          items: _prItems,
+          namingSeries: _prNamingSeries,
+          costCenter: order.costCenter,
+        );
+      }
+
+      _prSavedName = result['name'] ?? _prSavedName;
       _prSaved = true;
 
       if (mounted) {
@@ -448,12 +460,32 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     setState(() => _prLoading = false);
   }
 
-  /// Envía el Purchase Receipt.
+  /// Envía el Purchase Receipt y muestra el resultado.
   Future<void> _submitPR() async {
     if (!_prSaved || _prSavedName.isEmpty) {
       setState(() => _prError = 'Primero guardá el borrador');
       return;
     }
+
+    // Confirmar antes de enviar
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enviar Recepción'),
+        content: Text('¿Confirmás enviar $_prSavedName? No podrá modificarse después.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Enviar', style: TextStyle(color: Colors.green)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
 
     setState(() {
       _prLoading = true;
@@ -465,17 +497,75 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       await service.submitPurchaseReceipt(_prSavedName);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Recepción $_prSavedName enviada'),
-            backgroundColor: Colors.green,
+        // Mostrar diálogo de éxito con opción de ver el registro
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(Icons.check_circle, color: Colors.green, size: 48),
+            title: const Text('Recepción Enviada'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$_prSavedName',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'La recepción de mercadería fue creada exitosamente en ERPNext.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  // Cerrar formulario PR y volver a la PO
+                  setState(() {
+                    _showPRForm = false;
+                    _prSaved = false;
+                    _prSavedName = '';
+                  });
+                },
+                child: const Text('Volver a PO'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  final savedPrName = _prSavedName;
+                  // Cerrar formulario PR y volver a la PO
+                  setState(() {
+                    _showPRForm = false;
+                    _prSaved = false;
+                    _prSavedName = '';
+                  });
+                  // Navegar al detalle de la PR creada
+                  final service = context.read<ErpNextService>();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PurchaseReceiptDetailScreen(
+                        prName: savedPrName,
+                        erpNextService: service,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.open_in_new, size: 16),
+                label: const Text('Ver Registro'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
           ),
         );
-        setState(() {
-          _showPRForm = false;
-          _prSaved = false;
-          _prSavedName = '';
-        });
       }
     } catch (e) {
       _prError = 'Error enviando: $e';
@@ -1222,19 +1312,36 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
         // ─── HEADER ───
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          color: Colors.teal[50],
+          color: _prSaved ? Colors.green[50] : Colors.teal[50],
           child: Row(
             children: [
-              Icon(Icons.local_shipping, size: 18, color: Colors.teal[700]),
+              Icon(
+                _prSaved ? Icons.check_circle : Icons.local_shipping,
+                size: 18,
+                color: _prSaved ? Colors.green[700] : Colors.teal[700],
+              ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  _prSaved ? '📝 Borrador: $_prSavedName' : 'Nueva Recepción de Mercadería',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: Colors.teal[800],
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _prSaved ? 'Borrador Guardado' : 'Nueva Recepción de Mercadería',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: _prSaved ? Colors.green[800] : Colors.teal[800],
+                      ),
+                    ),
+                    if (_prSaved && _prSavedName.isNotEmpty)
+                      Text(
+                        _prSavedName,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                  ],
                 ),
               ),
               IconButton(

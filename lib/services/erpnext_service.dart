@@ -1070,4 +1070,20 @@ class ErpNextService {
       return [];
     }
   }
+
+  /// Obtiene el detalle completo de una Purchase Receipt por nombre.
+  Future<Map<String, dynamic>?> getPurchaseReceipt(String name) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Receipt/${Uri.encodeComponent(name)}',
+      );
+      if (response.statusCode == 200) {
+        return response.data?['data'];
+      }
+      return null;
+    } catch (e) {
+      print('[Service] getPurchaseReceipt error: $e');
+      return null;
+    }
+  }
 }
