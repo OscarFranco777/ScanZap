@@ -1046,6 +1046,31 @@ class ErpNextService {
     }
   }
 
+  /// Lista Purchase Receipts vinculados a una Purchase Order específica.
+  Future<List<Map<String, dynamic>>> listPurchaseReceiptsForPO(String poName) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Purchase Receipt',
+          'fields': '["name","supplier","posting_date","docstatus","grand_total"]',
+          'filters': '["Purchase Receipt Item","purchase_order","=","${poName}"]',
+          'group_by': 'name',
+          'order_by': 'creation desc',
+          'limit_page_length': 50,
+        },
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('[Service] listPurchaseReceiptsForPO error: $e');
+      return [];
+    }
+  }
+
   /// Lista Purchase Receipts existentes.
   Future<List<Map<String, dynamic>>> listPurchaseReceipts({
     int limit = 50,

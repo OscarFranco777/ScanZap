@@ -60,6 +60,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   bool _prSaved = false;
   String _prSavedName = '';
 
+  // ─── Recepciones vinculadas a la PO ───
+  List<Map<String, dynamic>> _linkedPRs = [];
+  bool _linkedPRsLoading = false;
+  bool _linkedPRsLoaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -346,6 +351,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     }
 
     setState(() => _prLoading = false);
+
+    // Cargar recepciones vinculadas después de abrir el formulario
+    _loadLinkedPRs();
   }
 
   /// Procesa un escaneo en el formulario de PR.
@@ -531,6 +539,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     _prSaved = false;
                     _prSavedName = '';
                   });
+                  // Recargar recepciones vinculadas
+                  _linkedPRsLoaded = false;
+                  _loadLinkedPRs();
                 },
                 child: const Text('Volver a PO'),
               ),
@@ -544,6 +555,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     _prSaved = false;
                     _prSavedName = '';
                   });
+                  // Recargar recepciones vinculadas
+                  _linkedPRsLoaded = false;
+                  _loadLinkedPRs();
                   // Navegar al detalle de la PR creada
                   final service = context.read<ErpNextService>();
                   Navigator.push(
@@ -584,7 +598,29 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       _prError = '';
       _prSaved = false;
       _prSavedName = '';
+      _linkedPRsLoaded = false;
     });
+  }
+
+  /// Carga las recepciones vinculadas a la PO actual.
+  Future<void> _loadLinkedPRs() async {
+    final provider = context.read<PurchaseOrderProvider>();
+    final order = provider.currentOrder;
+    if (order == null || order.id == null) return;
+
+    setState(() => _linkedPRsLoading = true);
+    try {
+      final service = context.read<ErpNextService>();
+      final prs = await service.listPurchaseReceiptsForPO(order.id!);
+      setState(() {
+        _linkedPRs = prs;
+        _linkedPRsLoaded = true;
+      });
+    } catch (e) {
+      print('[PR] Error loading linked PRs: $e');
+      setState(() => _linkedPRsLoaded = true);
+    }
+    setState(() => _linkedPRsLoading = false);
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -940,6 +976,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       return const Center(child: Text('Orden no disponible'));
     }
 
+    // Cargar recepciones vinculadas cuando la PO está enviada
+    if (provider.isSubmitted && !_linkedPRsLoaded && !_linkedPRsLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadLinkedPRs());
+    }
+
     // ─── Si se está creando una recepción, mostrar formulario PR ───
     if (_showPRForm) {
       return _buildPRForm(order);
@@ -1266,6 +1307,106 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   ),
                 ],
               ),
+            ),
+          ),
+
+        // ─── RECEPCIONES VINCULADAS (solo si la PO fue enviada) ───
+        if (provider.isSubmitted && !_showPRForm)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            color: Colors.blue[50],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.receipt_long, size: 16, color: Colors.blue[700]),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Recepciones de Mercadería',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Colors.blue[800],
+                      ),
+                    ),
+                    const Spacer(),
+                    if (_linkedPRsLoading)
+                      const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                if (_linkedPRs.isEmpty && !_linkedPRsLoading)
+                  Text(
+                    'No hay recepciones vinculadas',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                if (_linkedPRs.isNotEmpty)
+                  ..._linkedPRs.map((pr) {
+                    final docstatus = pr['docstatus'] ?? 0;
+                    final isDraft = docstatus == 0;
+                    final isSubmitted = docstatus == 1;
+                    final statusColor = isSubmitted
+                        ? Colors.green
+                        : isDraft
+                            ? Colors.orange
+                            : Colors.grey;
+                    final statusText = isSubmitted
+                        ? 'Enviado'
+                        : isDraft
+                            ? 'Borrador'
+                            : 'Cancelado';
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 4),
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(
+                          isDraft ? Icons.edit_note : Icons.check_circle,
+                          color: statusColor,
+                          size: 20,
+                        ),
+                        title: Text(
+                          pr['name'] ?? '',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          '${pr['posting_date'] ?? ''} — Bs. ${pr['grand_total'] ?? 0}',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        trailing: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: statusColor[50],
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            statusText,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: statusColor[800],
+                            ),
+                          ),
+                        ),
+                        onTap: () {
+                          final service = context.read<ErpNextService>();
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PurchaseReceiptDetailScreen(
+                                prName: pr['name'],
+                                erpNextService: service,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  }),
+              ],
             ),
           ),
 
