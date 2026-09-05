@@ -317,6 +317,125 @@ class ErpNextService {
   }
 
   // ══════════════════════════════════════════════════════════════
+  // NAMING SERIES
+  // ══════════════════════════════════════════════════════════════
+
+  /// Parsea opciones de naming_series desde un string (\n separadas).
+  List<String> _parseNamingOptions(dynamic raw) {
+    if (raw == null) return [];
+    final str = raw.toString().trim();
+    if (str.isEmpty) return [];
+    return str
+        .split(RegExp(r'[\n,;]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  /// Obtiene las series de numeracion disponibles para un DocType.
+  /// Usa frappe.client.get_meta (requiere permisos sobre el doctype, NO sobre DocType).
+  Future<List<String>> fetchNamingSeries(String doctype) async {
+    final allSeries = <String>{};
+
+    // -- M1: frappe.desk.form.load.getdoctype --
+    // Este es el endpoint que usa el frontend de Frappe cuando abris un form nuevo.
+    // Retorna los campos del doctype incluyendo las opciones de naming_series.
+    try {
+      print('[NS] M1: getdoctype for $doctype');
+      final r = await _dio.get(
+        '$baseUrl/api/method/frappe.desk.form.load.getdoctype',
+        queryParameters: {'doctype': doctype},
+      );
+      print('[NS] M1 status: ${r.statusCode}');
+      if (r.statusCode == 200) {
+        final docs = r.data?['docs'];
+        if (docs is List) {
+          for (final doc in docs) {
+            if (doc is Map && doc['doctype'] == 'DocType' && doc['name'] == doctype) {
+              // Buscar campo naming_series
+              final fields = doc['fields'];
+              if (fields is List) {
+                for (final f in fields) {
+                  if (f is Map && f['fieldname'] == 'naming_series') {
+                    final raw = f['options']?.toString() ?? '';
+                    final opts = _parseNamingOptions(raw);
+                    print('[NS] M1 naming_series options: $opts');
+                    allSeries.addAll(opts);
+                  }
+                }
+              }
+              break;
+            }
+          }
+        }
+      } else {
+        final body = r.data?.toString() ?? '';
+        print('[NS] M1 body: ${body.substring(0, body.length > 300 ? 300 : body.length)}');
+      }
+    } catch (e) {
+      print('[NS] M1 error: $e');
+    }
+
+    // -- M2: frappe.client.get_list sobre el doctype (drafts + submitted) --
+    // Busca TODOS los docs para encontrar series en uso
+    try {
+      print('[NS] M2: get_list docs for $doctype');
+      final r = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': doctype,
+          'fields': '["naming_series"]',
+          'filters': jsonEncode([['docstatus', 'in', [0, 1]]]),
+          'limit_page_length': 500,
+          'order_by': 'creation desc',
+        },
+      );
+      print('[NS] M2 status: ${r.statusCode}');
+      if (r.statusCode == 200) {
+        final List<dynamic> data = r.data?['message'] ?? [];
+        print('[NS] M2 docs: ${data.length}');
+        for (final row in data) {
+          final val = (row['naming_series'] ?? '').toString().trim();
+          if (val.isNotEmpty) allSeries.add(val);
+        }
+      }
+    } catch (e) {
+      print('[NS] M2 error: $e');
+    }
+
+    // -- M3: frappe.client.get_list sobre Document Naming Rule --
+    try {
+      print('[NS] M3: naming rules for $doctype');
+      final r = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Document Naming Rule',
+          'fields': '["name","prefix","document_type"]',
+          'filters': jsonEncode([
+            ['document_type', '=', doctype],
+          ]),
+          'limit_page_length': 50,
+        },
+      );
+      print('[NS] M3 status: ${r.statusCode}');
+      if (r.statusCode == 200) {
+        final List<dynamic> data = r.data?['message'] ?? [];
+        print('[NS] M3 rules: ${data.length}');
+        for (final d in data) {
+          final prefix = (d['prefix'] ?? '').toString().trim();
+          if (prefix.isNotEmpty) allSeries.add(prefix);
+        }
+      }
+    } catch (e) {
+      print('[NS] M3 error: $e');
+    }
+
+    final result = allSeries.toList();
+    print('[NS] TOTAL: ${result.length} series -> $result');
+    return result;
+  }
+
+
   // ALMACENES
   // ══════════════════════════════════════════════════════════════
 
@@ -411,6 +530,7 @@ class ErpNextService {
     required List<Map<String, dynamic>> items,
     String costCenter = '',
     String setWarehouse = '',
+    String namingSeries = '',
   }) async {
     final doc = {
       'doctype': 'Purchase Order',
@@ -418,6 +538,7 @@ class ErpNextService {
       'transaction_date': scheduleDate,
       'schedule_date': scheduleDate,
       'currency': 'HNL',
+      if (namingSeries.isNotEmpty) 'naming_series': namingSeries,
       if (costCenter.isNotEmpty) 'cost_center': costCenter,
       if (setWarehouse.isNotEmpty) 'set_warehouse': setWarehouse,
       'items': items
@@ -558,6 +679,205 @@ class ErpNextService {
       return [];
     } catch (e) {
       print('[Service] listPurchaseOrders error: $e');
+      return [];
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // RECEPCIÓN DE MERCADERÍA (Stock Entry — Material Receipt)
+  // ══════════════════════════════════════════════════════════════
+
+  /// Lista Stock Entries tipo "Material Receipt".
+  Future<List<Map<String, dynamic>>> listMaterialReceipts({
+    int limit = 50,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Stock Entry',
+          'fields': '["name","posting_date","stock_entry_type","docstatus","total_amount","supplier"]',
+          'filters': '[["stock_entry_type","=","Material Receipt"]]',
+          'order_by': 'creation desc',
+          'limit_page_length': limit,
+        },
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('[Service] listMaterialReceipts error: $e');
+      return [];
+    }
+  }
+
+  /// Obtiene un Stock Entry por nombre.
+  Future<Map<String, dynamic>?> getMaterialReceipt(String name) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
+      );
+      if (response.statusCode == 200) {
+        return response.data?['data'];
+      }
+      return null;
+    } catch (e) {
+      print('[Service] getMaterialReceipt error: $e');
+      return null;
+    }
+  }
+
+  /// Crea un Stock Entry tipo "Material Receipt" como borrador.
+  Future<Map<String, dynamic>> createMaterialReceipt({
+    required String warehouse,
+    required List<Map<String, dynamic>> items,
+    String? namingSeries,
+    String? supplier,
+  }) async {
+    final doc = {
+      'doctype': 'Stock Entry',
+      'stock_entry_type': 'Material Receipt',
+      'posting_date': DateTime.now().toIso8601String().substring(0, 10),
+      if (namingSeries != null && namingSeries.isNotEmpty) 'naming_series': namingSeries,
+      if (supplier != null && supplier.isNotEmpty) 'supplier': supplier,
+      'items': items
+          .map((item) => {
+                'doctype': 'Stock Entry Detail',
+                'item_code': item['item_code'],
+                'qty': item['qty'],
+                't_warehouse': warehouse,
+                if (item['uom'] != null) 'uom': item['uom'],
+              })
+          .toList(),
+    };
+
+    final response = await _dio.post(
+      '$baseUrl/api/resource/Stock%20Entry',
+      data: doc,
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error creando recepción: ${response.data}');
+  }
+
+  /// Actualiza un Stock Entry borrador existente.
+  Future<Map<String, dynamic>> updateMaterialReceipt({
+    required String name,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    final doc = {
+      'items': items
+          .map((item) => {
+                'doctype': 'Stock Entry Detail',
+                'item_code': item['item_code'],
+                'qty': item['qty'],
+                't_warehouse': item['t_warehouse'],
+                if (item['uom'] != null) 'uom': item['uom'],
+              })
+          .toList(),
+    };
+
+    final response = await _dio.put(
+      '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
+      data: doc,
+    );
+
+    if (response.statusCode == 200) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error actualizando recepción: ${response.data}');
+  }
+
+  /// Hace submit de un Stock Entry (borrador → submitted).
+  Future<Map<String, dynamic>> submitMaterialReceipt(String name) async {
+    try {
+      // Paso 1: Obtener el documento completo
+      final docResponse = await _dio.get(
+        '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
+      );
+      if (docResponse.statusCode != 200 || docResponse.data?['data'] == null) {
+        throw Exception('No se pudo obtener la recepción $name para enviar');
+      }
+      final Map<String, dynamic> doc = docResponse.data['data'];
+
+      // Paso 2: Enviar
+      final response = await _dio.post(
+        '$baseUrl/api/method/frappe.client.submit',
+        data: {
+          'doctype': 'Stock Entry',
+          'docname': name,
+          'doc': doc,
+        },
+      );
+      if (response.statusCode == 200) {
+        return response.data['data'] ?? {};
+      }
+      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+    } on DioException catch (e) {
+      String detail = '';
+      if (e.response?.data != null) {
+        if (e.response!.data is Map) {
+          detail = e.response!.data['exc'] ??
+              e.response!.data['_server_messages'] ??
+              e.response!.data['message'] ??
+              e.response!.data.toString();
+        } else {
+          detail = e.response!.data.toString();
+        }
+      }
+      if (detail.isNotEmpty) {
+        throw Exception('Servidor: $detail');
+      }
+      throw Exception('Error HTTP ${e.response?.statusCode}: ${e.message}');
+    }
+  }
+
+  /// Lista Purchase Orders enviadas (docstatus=1) para crear recepción desde PO.
+  Future<List<Map<String, dynamic>>> listSubmittedPurchaseOrders({
+    int limit = 50,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Purchase Order',
+          'fields': '["name","supplier","transaction_date","grand_total"]',
+          'filters': '[["docstatus","=",1]]',
+          'order_by': 'creation desc',
+          'limit_page_length': limit,
+        },
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('[Service] listSubmittedPurchaseOrders error: $e');
+      return [];
+    }
+  }
+
+  /// Obtiene los items de una Purchase Order enviada.
+  Future<List<Map<String, dynamic>>> getPurchaseOrderItems(String poName) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(poName)}',
+        queryParameters: {
+          'fields': '["items"]',
+        },
+      );
+      if (response.statusCode == 200) {
+        final items = response.data?['data']?['items'] ?? [];
+        return List<Map<String, dynamic>>.from(items);
+      }
+      return [];
+    } catch (e) {
+      print('[Service] getPurchaseOrderItems error: $e');
       return [];
     }
   }

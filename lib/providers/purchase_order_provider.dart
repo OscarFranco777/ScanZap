@@ -27,6 +27,8 @@ class PurchaseOrderProvider with ChangeNotifier {
   // ─── Catálogos para dropdowns ───
   List<Map<String, dynamic>> warehouses = [];
   List<Map<String, dynamic>> costCenters = [];
+  List<String> namingSeriesOptions = [];
+  String selectedNamingSeries = '';
   bool catalogsLoaded = false;
 
   // ─── Último escaneo ───
@@ -67,9 +69,14 @@ class PurchaseOrderProvider with ChangeNotifier {
       final results = await Future.wait([
         erpNextService.fetchWarehouses(),
         erpNextService.fetchCostCenters(),
+        erpNextService.fetchNamingSeries('Purchase Order'),
       ]);
-      warehouses = results[0];
-      costCenters = results[1];
+      warehouses = List<Map<String, dynamic>>.from(results[0] as List);
+      costCenters = List<Map<String, dynamic>>.from(results[1] as List);
+      namingSeriesOptions = List<String>.from(results[2] as List);
+      if (namingSeriesOptions.isNotEmpty && selectedNamingSeries.isEmpty) {
+        selectedNamingSeries = namingSeriesOptions.first;
+      }
     } catch (e) {
       print('[PO] Error cargando catálogos: $e');
     } finally {
@@ -85,6 +92,7 @@ class PurchaseOrderProvider with ChangeNotifier {
     required DateTime date,
     String costCenter = '',
     String setWarehouse = '',
+    String namingSeries = '',
   }) {
     currentOrder = PurchaseOrder(
       supplier: supplier,
@@ -92,6 +100,7 @@ class PurchaseOrderProvider with ChangeNotifier {
       scheduleDate: date,
       costCenter: costCenter,
       setWarehouse: setWarehouse,
+      namingSeries: namingSeries,
     );
     notifyListeners();
   }
@@ -262,6 +271,7 @@ class PurchaseOrderProvider with ChangeNotifier {
           items: items,
           costCenter: currentOrder!.costCenter,
           setWarehouse: currentOrder!.setWarehouse,
+          namingSeries: currentOrder!.namingSeries,
         );
       }
 

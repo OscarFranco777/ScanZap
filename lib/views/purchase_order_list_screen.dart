@@ -73,9 +73,12 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
                   ),
                 ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
+        onPressed: () async {
           context.read<PurchaseOrderProvider>().clearCurrentOrder();
-          Navigator.pushNamed(context, '/po-create');
+          final result = await Navigator.pushNamed(context, '/po-create');
+          if (result == true && context.mounted) {
+            context.read<PurchaseOrderProvider>().fetchOrders();
+          }
         },
         icon: const Icon(Icons.add),
         label: const Text('Nueva Orden'),
@@ -154,10 +157,14 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
             ),
           ],
         ),
-        onTap: () {
+        onTap: () async {
           // Cargar orden y navegar a detalle
           context.read<PurchaseOrderProvider>().loadOrder(name);
-          Navigator.pushNamed(context, '/po-detail');
+          final result = await Navigator.pushNamed(context, '/po-detail');
+          // Refrescar lista si hubo cambios (guardado/enviado)
+          if (result == true && context.mounted) {
+            context.read<PurchaseOrderProvider>().fetchOrders();
+          }
         },
       ),
     );

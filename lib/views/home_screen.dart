@@ -2,185 +2,129 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/inventory_provider.dart';
 
-/// Home screen: muestra el estado de la conexión y acceso rápido a módulos.
+/// Home screen — diseño moderno tipo Odoo con módulos en grid.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<InventoryProvider>();
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 600;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('📦 Inventario ERPNext'),
-        actions: [
-          if (provider.isConnected)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Center(
-                child: Chip(
-                  avatar: const Icon(Icons.person, size: 16, color: Colors.green),
-                  label: Text(provider.loggedUser, style: const TextStyle(fontSize: 11)),
-                  backgroundColor: Colors.green[50],
-                ),
-              ),
+      backgroundColor: const Color(0xFFF5F6FA),
+      body: SafeArea(
+        child: CustomScrollView(
+          slivers: [
+            // ─── Header con conexión y settings ───
+            SliverToBoxAdapter(
+              child: _ConnectionHeader(provider: provider, isSmallScreen: isSmallScreen),
             ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Estado de conexión
-            Card(
-              color: provider.isConnected ? Colors.green[50] : Colors.orange[50],
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
+
+            // ─── Módulos grid ───
+            SliverPadding(
+              padding: EdgeInsets.symmetric(
+                horizontal: isSmallScreen ? 16 : 32,
+                vertical: 8,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      provider.isConnected ? Icons.cloud_done : Icons.cloud_off,
-                      color: provider.isConnected ? Colors.green : Colors.orange,
-                      size: 32,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            provider.isConnected
-                                ? 'Conectado como ${provider.loggedUser}'
-                                : 'No conectado a ERPNext',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            provider.isConnected
-                                ? '${provider.allItems.length} productos cargados'
-                                : 'Necesitás configurar la conexión primero',
-                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                          ),
-                        ],
+                    Text(
+                      'Módulos',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey[800],
                       ),
                     ),
-                    if (provider.isConnected)
-                      TextButton(
-                        onPressed: () async {
-                          await provider.disconnect();
-                          if (context.mounted) {
-                            Navigator.pushReplacementNamed(context, '/config');
-                          }
-                        },
-                        child: const Text('Salir'),
-                      )
-                    else
-                      TextButton(
-                        onPressed: () => Navigator.pushNamed(context, '/config'),
-                        child: const Text('Conectar'),
-                      ),
+                    const SizedBox(height: 12),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 8),
 
-            // Estado del Excel
-            Card(
-              color: provider.excelLoaded ? Colors.teal[50] : Colors.grey[50],
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(
-                      provider.excelLoaded ? Icons.table_chart : Icons.upload_file,
-                      color: provider.excelLoaded ? Colors.teal : Colors.grey,
-                      size: 32,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            provider.excelLoaded
-                                ? 'Costos cargados'
-                                : 'Sin archivo de costos',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            provider.excelLoaded
-                                ? '${provider.excelService.filasConCosto} productos con costo'
-                                : 'Cargá un Excel con los costos unitarios',
-                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+            // ─── Grid de módulos ───
+            SliverPadding(
+              padding: EdgeInsets.symmetric(
+                horizontal: isSmallScreen ? 16 : 32,
+              ),
+              sliver: SliverGrid(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: isSmallScreen ? 2 : 3,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: isSmallScreen ? 1.0 : 1.1,
                 ),
+                delegate: SliverChildListDelegate([
+                  // Órdenes de Compra
+                  _ModuleTile(
+                    icon: Icons.shopping_cart_outlined,
+                    title: 'Órdenes\nde Compra',
+                    color: const Color(0xFFFF7043),
+                    enabled: provider.isConnected,
+                    onTap: () => Navigator.pushNamed(context, '/po-list'),
+                  ),
+
+                  // Recepción de Mercadería
+                  _ModuleTile(
+                    icon: Icons.inventory_2_outlined,
+                    title: 'Recepción\nde Mercadería',
+                    color: const Color(0xFF5C6BC0),
+                    enabled: provider.isConnected,
+                    onTap: () => Navigator.pushNamed(context, '/mr-list'),
+                  ),
+
+                  // Escáner
+                  _ModuleTile(
+                    icon: Icons.qr_code_scanner,
+                    title: 'Escanear\nInventario',
+                    color: const Color(0xFF66BB6A),
+                    enabled: provider.isReady,
+                    onTap: () => Navigator.pushNamed(context, '/scanner'),
+                  ),
+
+                  // Reporte
+                  _ModuleTile(
+                    icon: Icons.assessment_outlined,
+                    title: 'Ver\nReporte',
+                    color: const Color(0xFFAB47BC),
+                    enabled: provider.uniqueProducts > 0,
+                    onTap: () => Navigator.pushNamed(context, '/report'),
+                  ),
+
+                  // Cargar Costos
+                  _ModuleTile(
+                    icon: Icons.table_chart_outlined,
+                    title: 'Cargar\nCostos',
+                    color: const Color(0xFF26C6DA),
+                    onTap: () => Navigator.pushNamed(context, '/excel'),
+                  ),
+
+                  // Configuración
+                  _ModuleTile(
+                    icon: Icons.settings_outlined,
+                    title: 'Configuración',
+                    color: const Color(0xFF78909C),
+                    onTap: () => Navigator.pushNamed(context, '/config'),
+                  ),
+                ]),
               ),
             ),
-            const SizedBox(height: 24),
 
-            // Módulos
-            Text('Módulos', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-
-            // 1. Conexión
-            _ModuleCard(
-              icon: Icons.wifi,
-              title: 'Conexión',
-              subtitle: provider.isConnected
-                  ? 'Sesión activa'
-                  : 'Configurar ERPNext',
-              color: Colors.blue,
-              onTap: () => Navigator.pushNamed(context, '/config'),
-            ),
-
-            // 2. Excel
-            _ModuleCard(
-              icon: Icons.upload_file,
-              title: 'Cargar Costos',
-              subtitle: 'Archivo Excel con precios',
-              color: Colors.teal,
-              onTap: () => Navigator.pushNamed(context, '/excel'),
-            ),
-
-            // 3. Órdenes de Compra
-            _ModuleCard(
-              icon: Icons.shopping_cart,
-              title: 'Órdenes de Compra',
-              subtitle: provider.isConnected
-                  ? 'Crear y gestionar órdenes'
-                  : 'Conectate a ERPNext primero',
-              color: Colors.deepOrange,
-              enabled: provider.isConnected,
-              onTap: () => Navigator.pushNamed(context, '/po-list'),
-            ),
-
-            // 4. Escáner
-            _ModuleCard(
-              icon: Icons.qr_code_scanner,
-              title: 'Escanear Inventario',
-              subtitle: provider.isReady
-                  ? '${provider.uniqueProducts} productos contados'
-                  : 'Conectá ERPNext y cargá Excel primero',
-              color: provider.isReady ? Colors.green : Colors.grey,
-              enabled: provider.isReady,
-              onTap: () => Navigator.pushNamed(context, '/scanner'),
-            ),
-
-            // 5. Reporte
-            _ModuleCard(
-              icon: Icons.table_chart,
-              title: 'Ver Reporte',
-              subtitle: provider.uniqueProducts > 0
-                  ? '${provider.totalUnitsScanned} uds — L${provider.totalInventoryValue.toStringAsFixed(2)}'
-                  : 'Aún no hay datos',
-              color: Colors.purple,
-              enabled: provider.uniqueProducts > 0,
-              onTap: () => Navigator.pushNamed(context, '/report'),
+            // ─── Info footer ───
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: isSmallScreen ? 16 : 32,
+                  right: isSmallScreen ? 16 : 32,
+                  top: 20,
+                  bottom: 32,
+                ),
+                child: _StatsBar(provider: provider),
+              ),
             ),
           ],
         ),
@@ -189,19 +133,133 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-/// Widget reutilizable para las tarjetas de módulo.
-class _ModuleCard extends StatelessWidget {
+/// Header compacto con estado de conexión y botón de settings.
+class _ConnectionHeader extends StatelessWidget {
+  final InventoryProvider provider;
+  final bool isSmallScreen;
+
+  const _ConnectionHeader({required this.provider, required this.isSmallScreen});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.fromLTRB(
+        isSmallScreen ? 16 : 32,
+        12,
+        isSmallScreen ? 16 : 32,
+        16,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Logo
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: provider.isConnected
+                  ? const Color(0xFF43A047).withValues(alpha: 0.1)
+                  : const Color(0xFFEF6C00).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              Icons.inventory_2_outlined,
+              color: provider.isConnected ? const Color(0xFF43A047) : const Color(0xFFEF6C00),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Texto expandible
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'ScanZap',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.3,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: provider.isConnected ? const Color(0xFF43A047) : const Color(0xFFEF6C00),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        provider.isConnected
+                            ? '${provider.loggedUser} · ${provider.allItems.length} items'
+                            : 'Sin conexión',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[500],
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          // Botón de configuración
+          GestureDetector(
+            onTap: () => Navigator.pushNamed(context, '/config'),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                Icons.settings_outlined,
+                color: Colors.grey[600],
+                size: 20,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Módulo en el grid — cuadrado con icono grande.
+class _ModuleTile extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String subtitle;
   final Color color;
   final VoidCallback onTap;
   final bool enabled;
 
-  const _ModuleCard({
+  const _ModuleTile({
     required this.icon,
     required this.title,
-    required this.subtitle,
     required this.color,
     required this.onTap,
     this.enabled = true,
@@ -209,51 +267,117 @@ class _ModuleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+    return Material(
+      color: enabled ? Colors.white : Colors.grey[100],
+      borderRadius: BorderRadius.circular(16),
+      elevation: enabled ? 1 : 0,
+      shadowColor: Colors.black.withValues(alpha: 0.06),
       child: InkWell(
         onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: enabled ? color.withValues(alpha: 0.1) : Colors.grey[100],
-                  borderRadius: BorderRadius.circular(12),
+                  color: enabled
+                      ? color.withValues(alpha: 0.12)
+                      : Colors.grey[200],
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Icon(icon, color: enabled ? color : Colors.grey),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: enabled ? null : Colors.grey,
-                      ),
-                    ),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        color: enabled ? Colors.grey[600] : Colors.grey[400],
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
+                child: Icon(
+                  icon,
+                  size: 24,
+                  color: enabled ? color : Colors.grey[400],
                 ),
               ),
-              Icon(Icons.chevron_right, color: enabled ? Colors.grey : Colors.grey[300]),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                  color: enabled ? Colors.grey[800] : Colors.grey[400],
+                ),
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Barra de estadísticas sutil abajo.
+class _StatsBar extends StatelessWidget {
+  final InventoryProvider provider;
+
+  const _StatsBar({required this.provider});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!provider.isConnected && !provider.excelLoaded) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 12,
+        runSpacing: 4,
+        children: [
+          if (provider.isConnected) ...[
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_circle_outline, size: 14, color: Colors.grey[500]),
+                const SizedBox(width: 4),
+                Text(
+                  '${provider.allItems.length} productos',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ],
+          if (provider.excelLoaded) ...[
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.table_chart_outlined, size: 14, color: Colors.grey[500]),
+                const SizedBox(width: 4),
+                Text(
+                  '${provider.excelService.filasConCosto} con costo',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ],
+          Text(
+            'v1.0',
+            style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+          ),
+        ],
       ),
     );
   }

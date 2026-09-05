@@ -117,37 +117,53 @@ class _ExcelUploadScreenState extends State<ExcelUploadScreen> {
                             children: [
                               Expanded(
                                 child: DropdownButtonFormField<int>(
+                                  isExpanded: true,
                                   initialValue: _codigoColumn,
                                   decoration: const InputDecoration(
-                                    labelText: 'Columna del Código',
+                                    labelText: 'Cód.',
                                     border: OutlineInputBorder(),
                                     isDense: true,
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 8,
+                                    ),
                                   ),
                                   items: List.generate(26, (i) {
                                     final letter = String.fromCharCode(65 + i);
                                     return DropdownMenuItem(
                                       value: i,
-                                      child: Text('Columna $letter'),
+                                      child: Text(
+                                        'Col $letter',
+                                        style: const TextStyle(fontSize: 13),
+                                      ),
                                     );
                                   }),
                                   onChanged: (v) =>
                                       setState(() => _codigoColumn = v ?? 0),
                                 ),
                               ),
-                              const SizedBox(width: 16),
+                              const SizedBox(width: 10),
                               Expanded(
                                 child: DropdownButtonFormField<int>(
+                                  isExpanded: true,
                                   initialValue: _costoColumn,
                                   decoration: const InputDecoration(
-                                    labelText: 'Columna del Costo',
+                                    labelText: 'Costo',
                                     border: OutlineInputBorder(),
                                     isDense: true,
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 8,
+                                    ),
                                   ),
                                   items: List.generate(26, (i) {
                                     final letter = String.fromCharCode(65 + i);
                                     return DropdownMenuItem(
                                       value: i,
-                                      child: Text('Columna $letter'),
+                                      child: Text(
+                                        'Col $letter',
+                                        style: const TextStyle(fontSize: 13),
+                                      ),
                                     );
                                   }),
                                   onChanged: (v) =>
@@ -178,7 +194,9 @@ class _ExcelUploadScreenState extends State<ExcelUploadScreen> {
                             )
                           : const Icon(Icons.file_upload),
                       label: Text(
-                        _isProcessing ? 'Procesando...' : 'Seleccionar Archivo Excel',
+                        _isProcessing
+                            ? 'Procesando...'
+                            : 'Seleccionar Archivo Excel',
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.teal,
@@ -199,11 +217,16 @@ class _ExcelUploadScreenState extends State<ExcelUploadScreen> {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.check_circle, color: Colors.green),
+                                const Icon(
+                                  Icons.check_circle,
+                                  color: Colors.green,
+                                ),
                                 const SizedBox(width: 8),
                                 Text(
                                   'Excel cargado: ${provider.excelFileName}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ],
                             ),
@@ -272,7 +295,9 @@ class _ExcelUploadScreenState extends State<ExcelUploadScreen> {
                                 ),
                             if (provider.excelService.errores.length > 3)
                               GestureDetector(
-                                onTap: () => setState(() => _showAllWarnings = !_showAllWarnings),
+                                onTap: () => setState(
+                                  () => _showAllWarnings = !_showAllWarnings,
+                                ),
                                 child: Padding(
                                   padding: const EdgeInsets.only(top: 4),
                                   child: Text(

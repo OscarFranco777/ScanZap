@@ -3,22 +3,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
 import '../providers/inventory_provider.dart';
-import '../providers/purchase_order_provider.dart';
-import '../models/purchase_order.dart';
+import '../providers/material_receipt_provider.dart';
+import '../models/material_receipt.dart';
 
-/// Pantalla de creación y detalle de Orden de Compra.
+/// Pantalla de creación y detalle de Recepción de Mercadería.
 /// Incluye escáner de cámara y entrada manual.
-class PurchaseOrderDetailScreen extends StatefulWidget {
-  const PurchaseOrderDetailScreen({super.key});
+class MaterialReceiptDetailScreen extends StatefulWidget {
+  const MaterialReceiptDetailScreen({super.key});
 
   @override
-  State<PurchaseOrderDetailScreen> createState() =>
-      _PurchaseOrderDetailScreenState();
+  State<MaterialReceiptDetailScreen> createState() =>
+      _MaterialReceiptDetailScreenState();
 }
 
-class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
+class _MaterialReceiptDetailScreenState
+    extends State<MaterialReceiptDetailScreen> {
   // ─── Cámara ───
   MobileScannerController? _cameraController;
   bool _cameraActive = true;
@@ -27,18 +27,12 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   Timer? _lockTimer;
 
   // ─── Formulario ───
-  final _supplierController = TextEditingController();
-  String _selectedSupplierId = '';
   final _scanController = TextEditingController();
   final _qtyController = TextEditingController(text: '1');
-  DateTime _selectedDate = DateTime.now();
-  List<Map<String, dynamic>> _supplierSuggestions = [];
-  bool _showForm = true; // Mostrar formulario o escáner
+  bool _showForm = true;
 
-  // ─── Campos nuevos ───
+  // ─── Campos ───
   String _selectedWarehouse = '';
-  String _selectedCostCenter = '';
-  String _selectedNamingSeries = '';
 
   @override
   void initState() {
@@ -48,12 +42,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       facing: CameraFacing.back,
       torchEnabled: false,
     );
-    // Sincronizar caché de items del inventario y catálogos
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final inventoryProvider = context.read<InventoryProvider>();
-      final poProvider = context.read<PurchaseOrderProvider>();
-      poProvider.loadItemsCache(inventoryProvider.itemsByCode);
-      poProvider.fetchCatalogs();
+      final mrProvider = context.read<MaterialReceiptProvider>();
+      mrProvider.loadItemsCache(inventoryProvider.itemsByCode);
+      mrProvider.fetchCatalogs();
     });
   }
 
@@ -61,7 +54,6 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   void dispose() {
     _cameraController?.dispose();
     _lockTimer?.cancel();
-    _supplierController.dispose();
     _scanController.dispose();
     _qtyController.dispose();
     super.dispose();
@@ -90,9 +82,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     if (code.trim().isEmpty) return;
     HapticFeedback.mediumImpact();
 
-    final provider = context.read<PurchaseOrderProvider>();
+    final provider = context.read<MaterialReceiptProvider>();
     final qty = int.tryParse(_qtyController.text.trim()) ?? 1;
-    provider.scanItemToOrder(code, quantity: qty);
+    provider.scanItemToReceipt(code, quantity: qty);
     _qtyController.text = '1';
     _scanController.clear();
 
@@ -110,41 +102,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   // ACCIONES
   // ══════════════════════════════════════════════════════════════
 
-  Future<void> _selectDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (picked != null) {
-      setState(() => _selectedDate = picked);
-    }
-  }
-
-  void _searchSuppliers(String query) async {
-    if (query.length < 2) {
-      setState(() => _supplierSuggestions = []);
-      return;
-    }
-    final provider = context.read<PurchaseOrderProvider>();
-    final results = await provider.searchSuppliers(query);
-    if (mounted) {
-      setState(() => _supplierSuggestions = results);
-    }
-  }
-
-  void _createOrder() {
-    if (_supplierController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⚠️ Seleccioná un proveedor'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
+  void _startDirectCreation() {
     if (_selectedWarehouse.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -155,39 +113,14 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       return;
     }
 
-    if (_selectedCostCenter.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⚠️ Seleccioná un centro de costos'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    // Usar la serie seleccionada, o la primera de la lista como default
-    final provider = context.read<PurchaseOrderProvider>();
-    final namingSeries = _selectedNamingSeries.isNotEmpty
-        ? _selectedNamingSeries
-        : (provider.namingSeriesOptions.isNotEmpty
-              ? provider.namingSeriesOptions.first
-              : '');
-
-    provider.createNewOrder(
-      supplier: _supplierController.text.trim(),
-      supplierId: _selectedSupplierId,
-      date: _selectedDate,
-      costCenter: _selectedCostCenter,
-      setWarehouse: _selectedWarehouse,
-      namingSeries: namingSeries,
-    );
-
+    final provider = context.read<MaterialReceiptProvider>();
+    provider.createNewReceipt(warehouse: _selectedWarehouse);
     setState(() => _showForm = false);
   }
 
-  Future<void> _saveOrder() async {
-    final provider = context.read<PurchaseOrderProvider>();
-    final ok = await provider.saveOrder();
+  Future<void> _saveReceipt() async {
+    final provider = context.read<MaterialReceiptProvider>();
+    final ok = await provider.saveReceipt();
 
     if (!mounted) return;
 
@@ -195,13 +128,12 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '💾 Borrador guardado: ${provider.currentOrder?.id ?? ''}',
+            '💾 Borrador guardado: ${provider.currentReceipt?.id ?? ''}',
           ),
           backgroundColor: Colors.blue,
           duration: const Duration(seconds: 2),
         ),
       );
-      // No hacemos pop aquí porque el usuario sigue editando
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -212,26 +144,25 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     }
   }
 
-  Future<void> _submitOrder() async {
-    final provider = context.read<PurchaseOrderProvider>();
+  Future<void> _submitReceipt() async {
+    final provider = context.read<MaterialReceiptProvider>();
 
     if (!provider.isSaved) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⚠️ Primero guardá la orden como borrador'),
+          content: Text('⚠️ Primero guardá la recepción como borrador'),
           backgroundColor: Colors.orange,
         ),
       );
       return;
     }
 
-    // Confirmar antes de enviar
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Enviar orden'),
+        title: const Text('Enviar recepción'),
         content: const Text(
-          '¿Confirmás que querés enviar esta orden a ERPNext? No podrá modificarse después.',
+          '¿Confirmás que querés enviar esta recepción a ERPNext? No podrá modificarse después.',
         ),
         actions: [
           TextButton(
@@ -248,18 +179,20 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
     if (confirm != true) return;
 
-    final ok = await provider.submitOrder();
+    final ok = await provider.submitReceipt();
 
     if (!mounted) return;
 
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ Orden ${provider.currentOrder?.id ?? ''} enviada'),
+          content: Text(
+            '✅ Recepción ${provider.currentReceipt?.id ?? ''} enviada',
+          ),
           backgroundColor: Colors.green,
         ),
       );
-      Navigator.pop(context, true); // Señal para refrescar lista
+      Navigator.pop(context, true);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -276,13 +209,13 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<PurchaseOrderProvider>();
-    final order = provider.currentOrder;
+    final provider = context.watch<MaterialReceiptProvider>();
+    final receipt = provider.currentReceipt;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          order?.id != null ? '📦 ${order!.id}' : '🛒 Nueva Orden',
+          receipt?.id != null ? '📦 ${receipt!.id}' : '📦 Nueva Recepción',
           style: const TextStyle(fontSize: 16),
         ),
         actions: [
@@ -310,21 +243,21 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 ],
               ),
             ),
-          if (order?.id != null && !provider.isSubmitted)
+          if (receipt?.id != null && !provider.isSubmitted)
             IconButton(
-              onPressed: () => provider.refreshOrder(),
+              onPressed: () => provider.refreshReceipt(),
               icon: const Icon(Icons.refresh),
               tooltip: 'Refrescar',
             ),
         ],
       ),
-      body: _showForm && order == null
+      body: _showForm && receipt == null
           ? _buildCreationForm()
-          : _buildOrderDetail(),
+          : _buildReceiptDetail(),
     );
   }
 
-  /// Formulario de creación de orden.
+  /// Formulario de creación (recepción directa).
   Widget _buildCreationForm() {
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -332,176 +265,22 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Icon(
-            Icons.shopping_cart_checkout,
+            Icons.inventory_2_outlined,
             size: 48,
             color: Theme.of(context).primaryColor,
           ),
           const SizedBox(height: 8),
           Text(
-            'Crear Orden de Compra',
+            'Crear Recepción de Mercadería',
             style: Theme.of(context).textTheme.titleMedium,
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
 
-          // ─── Serie de Numeración (PRIMER CAMPO) ───
-          Consumer<PurchaseOrderProvider>(
-            builder: (context, poProvider, _) {
-              final series = poProvider.namingSeriesOptions;
-              final loaded = poProvider.catalogsLoaded;
-              if (!loaded) {
-                return DropdownButtonFormField<String>(
-                  isExpanded: true,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Serie de Numeración *',
-                    prefixIcon: Icon(Icons.tag),
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                  ),
-                  hint: const Text(
-                    'Cargando...',
-                    style: TextStyle(color: Colors.grey, fontSize: 13),
-                    maxLines: 1,
-                  ),
-                  items: const [],
-                  onChanged: null,
-                );
-              }
-              if (series.isEmpty) {
-                return const InputDecorator(
-                  decoration: InputDecoration(
-                    labelText: 'Serie de Numeración *',
-                    prefixIcon: Icon(Icons.tag),
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    helperText: 'No hay series disponibles en ERPNext',
-                  ),
-                );
-              }
-              return DropdownButtonFormField<String>(
-                isExpanded: true,
-                isDense: true,
-                decoration: const InputDecoration(
-                  labelText: 'Serie de Numeración *',
-                  prefixIcon: Icon(Icons.tag),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                ),
-                initialValue: (series.contains(_selectedNamingSeries))
-                    ? _selectedNamingSeries
-                    : series.first,
-                icon: const Icon(Icons.arrow_drop_down, size: 20),
-                items: series.map<DropdownMenuItem<String>>((s) {
-                  return DropdownMenuItem(
-                    value: s,
-                    child: Text(
-                      s,
-                      style: const TextStyle(fontSize: 13),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  );
-                }).toList(),
-                onChanged: (val) {
-                  setState(() => _selectedNamingSeries = val ?? '');
-                },
-              );
-            },
-          ),
-          const SizedBox(height: 10),
-
-          // Proveedor
-          TextField(
-            controller: _supplierController,
-            decoration: const InputDecoration(
-              labelText: 'Proveedor *',
-              hintText: 'Escribí el nombre del proveedor',
-              prefixIcon: Icon(Icons.business),
-              border: OutlineInputBorder(),
-              isDense: true,
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
-            ),
-            onChanged: _searchSuppliers,
-          ),
-          if (_supplierSuggestions.isNotEmpty)
-            Container(
-              constraints: const BoxConstraints(maxHeight: 200),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[300]!),
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(4),
-                  bottomRight: Radius.circular(4),
-                ),
-              ),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _supplierSuggestions.length,
-                itemBuilder: (context, index) {
-                  final s = _supplierSuggestions[index];
-                  return ListTile(
-                    dense: true,
-                    title: Text(
-                      s['supplier_name'] ?? s['name'] ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      s['name'] ?? '',
-                      style: const TextStyle(fontSize: 11),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onTap: () {
-                      _supplierController.text =
-                          s['supplier_name'] ?? s['name'] ?? '';
-                      _selectedSupplierId = s['name'] ?? '';
-                      setState(() => _supplierSuggestions = []);
-                    },
-                  );
-                },
-              ),
-            ),
-          const SizedBox(height: 10),
-
-          // Fecha
-          InkWell(
-            onTap: _selectDate,
-            child: InputDecorator(
-              decoration: const InputDecoration(
-                labelText: 'Fecha de Entrega *',
-                prefixIcon: Icon(Icons.calendar_today),
-                border: OutlineInputBorder(),
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-              ),
-              child: Text(
-                DateFormat('dd/MM/yyyy').format(_selectedDate),
-                style: const TextStyle(fontSize: 14),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-
-          // ─── Almacén Destino ───
-          Consumer<PurchaseOrderProvider>(
-            builder: (context, poProvider, _) {
-              final warehouses = poProvider.warehouses;
-              final loaded = poProvider.catalogsLoaded;
+          // Almacén destino
+          Consumer<MaterialReceiptProvider>(
+            builder: (context, mrProvider, _) {
+              final warehouses = mrProvider.warehouses;
               return DropdownButtonFormField<String>(
                 isExpanded: true,
                 isDense: true,
@@ -519,7 +298,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     ? _selectedWarehouse
                     : null,
                 hint: Text(
-                  !loaded ? 'Cargando...' : 'Almacén destino',
+                  'Seleccioná almacén',
                   style: TextStyle(color: Colors.grey[500], fontSize: 13),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -544,62 +323,12 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               );
             },
           ),
-          const SizedBox(height: 10),
-
-          // ─── Centro de Costos ───
-          Consumer<PurchaseOrderProvider>(
-            builder: (context, poProvider, _) {
-              final centers = poProvider.costCenters;
-              final loaded = poProvider.catalogsLoaded;
-              return DropdownButtonFormField<String>(
-                isExpanded: true,
-                isDense: true,
-                decoration: const InputDecoration(
-                  labelText: 'Centro de Costos *',
-                  prefixIcon: Icon(Icons.account_balance),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                ),
-                initialValue: _selectedCostCenter.isNotEmpty
-                    ? _selectedCostCenter
-                    : null,
-                hint: Text(
-                  !loaded ? 'Cargando...' : 'Centro de costos',
-                  style: TextStyle(color: Colors.grey[500], fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                icon: const Icon(Icons.arrow_drop_down, size: 20),
-                items: centers.map<DropdownMenuItem<String>>((c) {
-                  final name = c['name'] ?? '';
-                  final displayName = c['cost_center_name'] ?? name;
-                  return DropdownMenuItem(
-                    value: name,
-                    child: Text(
-                      displayName,
-                      style: const TextStyle(fontSize: 13),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  );
-                }).toList(),
-                onChanged: (val) {
-                  setState(() => _selectedCostCenter = val ?? '');
-                },
-              );
-            },
-          ),
           const SizedBox(height: 16),
 
-          // Botón crear
           SizedBox(
             height: 44,
             child: ElevatedButton.icon(
-              onPressed: _createOrder,
+              onPressed: _startDirectCreation,
               icon: const Icon(Icons.arrow_forward),
               label: const Text('Crear y Escanear'),
               style: ElevatedButton.styleFrom(
@@ -614,13 +343,13 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     );
   }
 
-  /// Detalle de orden con escáner.
-  Widget _buildOrderDetail() {
-    final provider = context.watch<PurchaseOrderProvider>();
-    final order = provider.currentOrder;
+  /// Detalle de recepción con escáner.
+  Widget _buildReceiptDetail() {
+    final provider = context.watch<MaterialReceiptProvider>();
+    final receipt = provider.currentReceipt;
 
-    if (order == null) {
-      return const Center(child: Text('Orden no disponible'));
+    if (receipt == null) {
+      return const Center(child: Text('Recepción no disponible'));
     }
 
     return Column(
@@ -705,7 +434,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             ),
           ),
 
-        // ─── CONTROLES (solo si no fue enviada) ───
+        // ─── CONTROLES ───
         if (!provider.isSubmitted)
           Container(
             color: Colors.blue[50],
@@ -785,7 +514,6 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   ],
                 ),
 
-                // Último escaneo
                 if (provider.lastScannedCode.isNotEmpty)
                   Container(
                     width: double.infinity,
@@ -813,40 +541,40 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             ),
           ),
 
-        // ─── INFO ORDEN ───
+        // ─── INFO RECEPCIÓN ───
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           color: Colors.grey[100],
           child: Row(
             children: [
-              Icon(Icons.business, size: 14, color: Colors.grey[600]),
+              Icon(Icons.warehouse, size: 14, color: Colors.grey[600]),
               const SizedBox(width: 4),
-              Text(
-                order.supplier,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                  color: Colors.grey[800],
+              Expanded(
+                child: Text(
+                  receipt.warehouse.isNotEmpty
+                      ? receipt.warehouse
+                      : 'Sin almacén',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    color: Colors.grey[800],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
-              Text(
-                DateFormat('dd/MM/yyyy').format(order.scheduleDate),
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-              ),
-              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.orange[100],
+                  color: Colors.blue[100],
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  '${order.items.length} items — ${order.totalQty} uds',
+                  '${receipt.items.length} items — ${receipt.totalQty} uds',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: Colors.orange[800],
+                    color: Colors.blue[800],
                   ),
                 ),
               ),
@@ -858,7 +586,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
         // ─── LISTA DE ITEMS ───
         Expanded(
-          child: order.items.isEmpty
+          child: receipt.items.isEmpty
               ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -878,26 +606,25 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 )
               : ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
-                  itemCount: order.items.length,
+                  itemCount: receipt.items.length,
                   itemBuilder: (context, index) {
-                    return _buildItemCard(order.items[index], index);
+                    return _buildItemCard(receipt.items[index], index);
                   },
                 ),
         ),
 
-        // ─── BOTÓN ENVIAR / GUARDAR ───
-        if (order.items.isNotEmpty && !provider.isSubmitted)
+        // ─── BOTÓN GUARDAR / ENVIAR ───
+        if (receipt.items.isNotEmpty && !provider.isSubmitted)
           SafeArea(
             child: Container(
               padding: const EdgeInsets.all(8),
               child: Row(
                 children: [
-                  // Botón Guardar (borrador)
                   Expanded(
                     child: SizedBox(
                       height: 48,
                       child: ElevatedButton.icon(
-                        onPressed: provider.isLoading ? null : _saveOrder,
+                        onPressed: provider.isLoading ? null : _saveReceipt,
                         icon: provider.isLoading
                             ? const SizedBox(
                                 width: 16,
@@ -920,14 +647,13 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Botón Enviar (submit)
                   Expanded(
                     child: SizedBox(
                       height: 48,
                       child: ElevatedButton.icon(
                         onPressed: (provider.isLoading || !provider.isSaved)
                             ? null
-                            : _submitOrder,
+                            : _submitReceipt,
                         icon: const Icon(Icons.send),
                         label: const Text(
                           'Enviar',
@@ -950,8 +676,8 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     );
   }
 
-  Widget _buildItemCard(PurchaseOrderItem item, int index) {
-    final provider = context.read<PurchaseOrderProvider>();
+  Widget _buildItemCard(MaterialReceiptItem item, int index) {
+    final provider = context.read<MaterialReceiptProvider>();
     final readOnly = provider.isSubmitted;
 
     return Card(

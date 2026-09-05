@@ -10,6 +10,7 @@ class PurchaseOrder {
   String status; // Borrador, Enviada, Cancelada
   double grandTotal;
   DateTime createdAt;
+  String namingSeries; // Serie de numeración (ej: PO-.YYYY.-)
 
   PurchaseOrder({
     this.id,
@@ -22,6 +23,7 @@ class PurchaseOrder {
     this.status = 'Borrador',
     this.grandTotal = 0.0,
     DateTime? createdAt,
+    this.namingSeries = '',
   })  : items = items ?? [],
         createdAt = createdAt ?? DateTime.now();
 
