@@ -14,6 +14,8 @@ class MaterialReceiptListScreen extends StatefulWidget {
 }
 
 class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
+  bool _statsExpanded = false;
+
   @override
   void initState() {
     super.initState();
@@ -65,41 +67,109 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
             ],
           ),
 
-          // ─── Stats ───
-          AppDesign.buildStatsCard(
-            children: [
-              AppDesign.buildStatRow(
-                items: [
-                  AppDesign.statBox(
-                    icon: Icons.local_shipping_outlined,
-                    label: 'TOTAL RECEPCIONES',
-                    value: '${receipts.length}',
-                  ),
-                  AppDesign.statBox(
-                    icon: Icons.edit_note,
-                    label: 'BORRADORES',
-                    value: '$drafts',
-                    valueColor: AppDesign.statusDraft,
-                  ),
-                ],
+          // ─── Stats (colapsable) ───
+          GestureDetector(
+            onTap: () => setState(() => _statsExpanded = !_statsExpanded),
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppDesign.navy,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppDesign.navy.withValues(alpha: 0.25),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    // Header toggle
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.analytics_outlined,
+                            size: 16,
+                            color: AppDesign.accent,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Resumen de Recepciones',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const Spacer(),
+                          AnimatedRotation(
+                            turns: _statsExpanded ? 0.5 : 0,
+                            duration: const Duration(milliseconds: 250),
+                            child: Icon(
+                              Icons.keyboard_arrow_down,
+                              size: 18,
+                              color: Colors.white.withValues(alpha: 0.6),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Stats content (animated)
+                    if (_statsExpanded)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                        child: Column(
+                          children: [
+                            AppDesign.buildStatRow(
+                              compact: true,
+                              items: [
+                                AppDesign.statBox(
+                                  icon: Icons.local_shipping_outlined,
+                                  label: 'TOTAL RECEPCIONES',
+                                  value: '${receipts.length}',
+                                  compact: true,
+                                ),
+                                AppDesign.statBox(
+                                  icon: Icons.edit_note,
+                                  label: 'BORRADORES',
+                                  value: '$drafts',
+                                  valueColor: AppDesign.statusDraft,
+                                  compact: true,
+                                ),
+                              ],
+                            ),
+                            AppDesign.buildStatRow(
+                              compact: true,
+                              items: [
+                                AppDesign.statBox(
+                                  icon: Icons.check_circle_outline,
+                                  label: 'ENVIADAS',
+                                  value: '$submitted',
+                                  valueColor: AppDesign.statusSubmitted,
+                                  compact: true,
+                                ),
+                                AppDesign.statBox(
+                                  icon: Icons.cancel_outlined,
+                                  label: 'CANCELADAS',
+                                  value: '$cancelled',
+                                  valueColor: AppDesign.statusCancelled,
+                                  compact: true,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              AppDesign.buildStatRow(
-                items: [
-                  AppDesign.statBox(
-                    icon: Icons.check_circle_outline,
-                    label: 'ENVIADAS',
-                    value: '$submitted',
-                    valueColor: AppDesign.statusSubmitted,
-                  ),
-                  AppDesign.statBox(
-                    icon: Icons.cancel_outlined,
-                    label: 'CANCELADAS',
-                    value: '$cancelled',
-                    valueColor: AppDesign.statusCancelled,
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
 
           // ─── Lista ───
@@ -358,7 +428,9 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
 
   Widget _buildReceiptCard(BuildContext context, Map<String, dynamic> receipt) {
     final name = receipt['name'] ?? '';
+    final supplier = receipt['supplier'] ?? '';
     final date = receipt['posting_date'] ?? '';
+    final total = (receipt['grand_total'] ?? 0).toDouble();
     final docstatus = receipt['docstatus'] ?? 0;
 
     String statusText;
@@ -403,17 +475,41 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
                     color: Color(0xFF1B2A4A),
                   ),
                 ),
+                if (supplier.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    supplier,
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                ],
                 const SizedBox(height: 2),
                 Text(
                   date.isNotEmpty
                       ? DateFormat('dd/MM/yyyy').format(DateTime.tryParse(date) ?? DateTime.now())
                       : '',
-                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                  style: TextStyle(color: Colors.grey[400], fontSize: 11),
                 ),
               ],
             ),
           ),
-          AppDesign.statusBadge(statusText, statusColor),
+          // Status + Total
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              AppDesign.statusBadge(statusText, statusColor),
+              if (total > 0) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'L ${total.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: Color(0xFF1B2A4A),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );

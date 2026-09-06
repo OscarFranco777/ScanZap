@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../providers/inventory_provider.dart';
 import '../providers/material_receipt_provider.dart';
 import '../models/material_receipt.dart';
+import '../theme/app_design.dart';
 
 /// Pantalla de creación y detalle de Recepción de Mercadería.
 /// Incluye escáner de cámara y entrada manual.
@@ -213,128 +214,228 @@ class _MaterialReceiptDetailScreenState
     final receipt = provider.currentReceipt;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          receipt?.id != null ? '📦 ${receipt!.id}' : '📦 Nueva Recepción',
-          style: const TextStyle(fontSize: 16),
-        ),
-        actions: [
-          if (provider.isSubmitted)
-            Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.green[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.check_circle, size: 14, color: Colors.green[700]),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Enviada',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green[700],
-                    ),
+      backgroundColor: AppDesign.bg,
+      body: Column(
+        children: [
+          // ─── Header navy ───
+          AppDesign.buildHeader(
+            title: receipt?.id != null ? '📦 ${receipt!.id}' : '📦 Nueva Recepción',
+            subtitle: provider.isSubmitted
+                ? 'Recepción enviada a ERPNext'
+                : receipt?.id != null
+                    ? 'Recepción en borrador'
+                    : 'Crear nueva recepción',
+            icon: Icons.local_shipping_outlined,
+            onBack: () => Navigator.pop(context),
+            actions: [
+              if (provider.isSubmitted)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppDesign.statusSubmitted.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                ],
-              ),
-            ),
-          if (receipt?.id != null && !provider.isSubmitted)
-            IconButton(
-              onPressed: () => provider.refreshReceipt(),
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Refrescar',
-            ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle, size: 13, color: AppDesign.statusSubmitted),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Enviada',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppDesign.statusSubmitted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (receipt?.id != null && !provider.isSubmitted)
+                GestureDetector(
+                  onTap: () => provider.refreshReceipt(),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.refresh, color: Colors.white, size: 18),
+                  ),
+                ),
+              const SizedBox(width: 12),
+            ],
+          ),
+
+          // ─── Body ───
+          Expanded(
+            child: _showForm && receipt == null
+                ? _buildCreationForm()
+                : _buildReceiptDetail(),
+          ),
         ],
       ),
-      body: _showForm && receipt == null
-          ? _buildCreationForm()
-          : _buildReceiptDetail(),
     );
   }
 
   /// Formulario de creación (recepción directa).
   Widget _buildCreationForm() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(
-            Icons.inventory_2_outlined,
-            size: 48,
-            color: Theme.of(context).primaryColor,
+          // ─── Icono y título ───
+          Center(
+            child: AppDesign.circleAvatar(
+              icon: Icons.inventory_2_outlined,
+              bgColor: AppDesign.tealLight,
+              iconColor: AppDesign.tealIcon,
+              size: 56,
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(
+          const SizedBox(height: 12),
+          const Text(
             'Crear Recepción de Mercadería',
-            style: Theme.of(context).textTheme.titleMedium,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: AppDesign.navy,
+            ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 4),
+          Text(
+            'Seleccioná el almacén destino para empezar',
+            style: TextStyle(color: Colors.grey[500], fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
 
-          // Almacén destino
-          Consumer<MaterialReceiptProvider>(
-            builder: (context, mrProvider, _) {
-              final warehouses = mrProvider.warehouses;
-              return DropdownButtonFormField<String>(
-                isExpanded: true,
-                isDense: true,
-                decoration: const InputDecoration(
-                  labelText: 'Almacén Destino *',
-                  prefixIcon: Icon(Icons.warehouse),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
+          // ─── Almacén destino ───
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppDesign.navy.withValues(alpha: 0.06),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Consumer<MaterialReceiptProvider>(
+              builder: (context, mrProvider, _) {
+                final warehouses = mrProvider.warehouses;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        AppDesign.circleAvatar(
+                          icon: Icons.warehouse_outlined,
+                          bgColor: AppDesign.tealLight,
+                          iconColor: AppDesign.tealIcon,
+                          size: 32,
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'Almacén Destino *',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                            color: AppDesign.navy,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      isDense: true,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                      initialValue: _selectedWarehouse.isNotEmpty
+                          ? _selectedWarehouse
+                          : null,
+                      hint: Text(
+                        'Seleccioná almacén',
+                        style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      icon: const Icon(Icons.arrow_drop_down, size: 20),
+                      items: warehouses.map<DropdownMenuItem<String>>((w) {
+                        final name = w['name'] ?? '';
+                        final displayName = w['warehouse_name'] ?? name;
+                        return DropdownMenuItem(
+                          value: name,
+                          child: Text(
+                            displayName,
+                            style: const TextStyle(fontSize: 13),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (val) {
+                        setState(() => _selectedWarehouse = val ?? '');
+                      },
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ─── Botón crear ───
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppDesign.navy.withValues(alpha: 0.2),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: SizedBox(
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: _startDirectCreation,
+                icon: const Icon(Icons.arrow_forward, size: 20),
+                label: const Text(
+                  'Crear y Escanear',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppDesign.navy,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
-                initialValue: _selectedWarehouse.isNotEmpty
-                    ? _selectedWarehouse
-                    : null,
-                hint: Text(
-                  'Seleccioná almacén',
-                  style: TextStyle(color: Colors.grey[500], fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                icon: const Icon(Icons.arrow_drop_down, size: 20),
-                items: warehouses.map<DropdownMenuItem<String>>((w) {
-                  final name = w['name'] ?? '';
-                  final displayName = w['warehouse_name'] ?? name;
-                  return DropdownMenuItem(
-                    value: name,
-                    child: Text(
-                      displayName,
-                      style: const TextStyle(fontSize: 13),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  );
-                }).toList(),
-                onChanged: (val) {
-                  setState(() => _selectedWarehouse = val ?? '');
-                },
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-
-          SizedBox(
-            height: 44,
-            child: ElevatedButton.icon(
-              onPressed: _startDirectCreation,
-              icon: const Icon(Icons.arrow_forward),
-              label: const Text('Crear y Escanear'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).primaryColor,
-                foregroundColor: Colors.white,
-                textStyle: const TextStyle(fontSize: 15),
               ),
             ),
           ),
@@ -349,7 +450,10 @@ class _MaterialReceiptDetailScreenState
     final receipt = provider.currentReceipt;
 
     if (receipt == null) {
-      return const Center(child: Text('Recepción no disponible'));
+      return AppDesign.emptyState(
+        icon: Icons.error_outline,
+        title: 'Recepción no disponible',
+      );
     }
 
     return Column(
@@ -370,8 +474,8 @@ class _MaterialReceiptDetailScreenState
                   child: Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: _scanLocked ? Colors.orange : Colors.blue,
-                        width: 2,
+                        color: _scanLocked ? AppDesign.statusDraft : AppDesign.accent,
+                        width: 2.5,
                       ),
                     ),
                     child: Align(
@@ -379,12 +483,12 @@ class _MaterialReceiptDetailScreenState
                       child: Container(
                         margin: const EdgeInsets.only(top: 6),
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 4,
+                          horizontal: 14,
+                          vertical: 5,
                         ),
                         decoration: BoxDecoration(
-                          color: (_scanLocked ? Colors.orange : Colors.blue)
-                              .withOpacity(0.9),
+                          color: (_scanLocked ? AppDesign.statusDraft : AppDesign.accent)
+                              .withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Text(
@@ -437,62 +541,86 @@ class _MaterialReceiptDetailScreenState
         // ─── CONTROLES ───
         if (!provider.isSubmitted)
           Container(
-            color: Colors.blue[50],
-            padding: const EdgeInsets.all(8),
+            margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppDesign.navy.withValues(alpha: 0.06),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.all(10),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   children: [
-                    SizedBox(
-                      width: 70,
+                    // Cantidad
+                    Container(
+                      width: 64,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey[300]!),
+                      ),
                       child: TextField(
                         controller: _qtyController,
                         keyboardType: TextInputType.number,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                          fontSize: 18,
+                          fontSize: 17,
                           fontWeight: FontWeight.bold,
                         ),
                         decoration: const InputDecoration(
                           labelText: 'Cant.',
-                          border: OutlineInputBorder(),
-                          filled: true,
-                          fillColor: Colors.white,
+                          border: InputBorder.none,
                           isDense: true,
                           contentPadding: EdgeInsets.symmetric(
                             horizontal: 4,
-                            vertical: 10,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: TextField(
-                        controller: _scanController,
-                        style: const TextStyle(fontSize: 13),
-                        decoration: const InputDecoration(
-                          labelText: 'Código',
-                          hintText: 'Escanear o escribir...',
-                          prefixIcon: Icon(Icons.qr_code_scanner, size: 18),
-                          border: OutlineInputBorder(),
-                          filled: true,
-                          fillColor: Colors.white,
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 6,
                             vertical: 8,
                           ),
                         ),
-                        onSubmitted: (v) {
-                          if (v.trim().isNotEmpty) _processScan(v);
-                        },
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    IconButton(
-                      onPressed: () {
+                    const SizedBox(width: 8),
+                    // Código
+                    Expanded(
+                      child: Container(
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.grey[300]!),
+                        ),
+                        child: TextField(
+                          controller: _scanController,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: InputDecoration(
+                            labelText: 'Código',
+                            hintText: 'Escanear o escribir...',
+                            prefixIcon: Icon(Icons.qr_code_scanner, size: 18, color: Colors.grey[500]),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 8,
+                            ),
+                          ),
+                          onSubmitted: (v) {
+                            if (v.trim().isNotEmpty) _processScan(v);
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Botón cámara/texto
+                    GestureDetector(
+                      onTap: () {
                         setState(() => _cameraActive = !_cameraActive);
                         if (_cameraActive) {
                           _cameraController?.start();
@@ -500,15 +628,18 @@ class _MaterialReceiptDetailScreenState
                           _cameraController?.stop();
                         }
                       },
-                      icon: Icon(
-                        _cameraActive ? Icons.camera_alt : Icons.keyboard,
-                      ),
-                      tooltip: _cameraActive ? 'Modo texto' : 'Modo cámara',
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.all(6),
-                        minimumSize: const Size(36, 36),
+                      child: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: AppDesign.blueIcon,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          _cameraActive ? Icons.camera_alt : Icons.keyboard,
+                          color: Colors.white,
+                          size: 20,
+                        ),
                       ),
                     ),
                   ],
@@ -517,20 +648,20 @@ class _MaterialReceiptDetailScreenState
                 if (provider.lastScannedCode.isNotEmpty)
                   Container(
                     width: double.infinity,
-                    margin: const EdgeInsets.only(top: 6),
-                    padding: const EdgeInsets.all(6),
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
                       color: provider.lastScanWasError
                           ? Colors.red[50]
-                          : Colors.green[50],
-                      borderRadius: BorderRadius.circular(6),
+                          : AppDesign.greenLight,
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
                       provider.lastScanMessage,
                       style: TextStyle(
                         color: provider.lastScanWasError
                             ? Colors.red[800]
-                            : Colors.green[800],
+                            : AppDesign.greenIcon,
                         fontWeight: FontWeight.bold,
                         fontSize: 12,
                       ),
@@ -541,71 +672,102 @@ class _MaterialReceiptDetailScreenState
             ),
           ),
 
+        const SizedBox(height: 8),
+
         // ─── INFO RECEPCIÓN ───
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          color: Colors.grey[100],
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: AppDesign.navy.withValues(alpha: 0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
           child: Row(
             children: [
-              Icon(Icons.warehouse, size: 14, color: Colors.grey[600]),
-              const SizedBox(width: 4),
+              AppDesign.circleAvatar(
+                icon: Icons.warehouse_outlined,
+                bgColor: AppDesign.tealLight,
+                iconColor: AppDesign.tealIcon,
+                size: 30,
+              ),
+              const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  receipt.warehouse.isNotEmpty
-                      ? receipt.warehouse
-                      : 'Sin almacén',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    color: Colors.grey[800],
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Almacén',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey[500],
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    Text(
+                      receipt.warehouse.isNotEmpty
+                          ? receipt.warehouse
+                          : 'Sin almacén',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        color: AppDesign.navy,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.blue[100],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${receipt.items.length} items — ${receipt.totalQty} uds',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue[800],
-                  ),
+              AppDesign.statusBadge(
+                '${receipt.items.length} items — ${receipt.totalQty} uds',
+                AppDesign.blueIcon,
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        // ─── SECCIÓN ITEMS ───
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              const Icon(Icons.inventory_2_outlined, size: 16, color: AppDesign.navy),
+              const SizedBox(width: 6),
+              Text(
+                'ITEMS (${receipt.items.length})',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: AppDesign.navy,
+                  letterSpacing: 0.6,
                 ),
               ),
             ],
           ),
         ),
 
-        const Divider(height: 1),
+        const SizedBox(height: 8),
 
         // ─── LISTA DE ITEMS ───
         Expanded(
           child: receipt.items.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.qr_code_scanner,
-                        size: 48,
-                        color: Colors.grey[300],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Escaneá productos para agregar',
-                        style: TextStyle(color: Colors.grey[500]),
-                      ),
-                    ],
-                  ),
+              ? AppDesign.emptyState(
+                  icon: Icons.qr_code_scanner,
+                  title: 'Escaneá productos para agregar',
+                  subtitle: 'Usá la cámara o escribí el código',
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: receipt.items.length,
                   itemBuilder: (context, index) {
                     return _buildItemCard(receipt.items[index], index);
@@ -617,7 +779,7 @@ class _MaterialReceiptDetailScreenState
         if (receipt.items.isNotEmpty && !provider.isSubmitted)
           SafeArea(
             child: Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Row(
                 children: [
                   Expanded(
@@ -634,19 +796,23 @@ class _MaterialReceiptDetailScreenState
                                   color: Colors.white,
                                 ),
                               )
-                            : const Icon(Icons.save),
+                            : const Icon(Icons.save, size: 18),
                         label: Text(
                           provider.isSaved ? 'Actualizar' : 'Guardar',
-                          style: const TextStyle(fontSize: 14),
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
+                          backgroundColor: AppDesign.blueIcon,
                           foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 2,
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: SizedBox(
                       height: 48,
@@ -654,16 +820,20 @@ class _MaterialReceiptDetailScreenState
                         onPressed: (provider.isLoading || !provider.isSaved)
                             ? null
                             : _submitReceipt,
-                        icon: const Icon(Icons.send),
+                        icon: const Icon(Icons.send, size: 18),
                         label: const Text(
                           'Enviar',
-                          style: TextStyle(fontSize: 14),
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: provider.isSaved
-                              ? Colors.green
-                              : Colors.grey,
+                              ? AppDesign.greenIcon
+                              : Colors.grey[400],
                           foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: provider.isSaved ? 2 : 0,
                         ),
                       ),
                     ),
@@ -680,13 +850,32 @@ class _MaterialReceiptDetailScreenState
     final provider = context.read<MaterialReceiptProvider>();
     final readOnly = provider.isSubmitted;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      color: readOnly ? Colors.grey[50] : null,
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+      decoration: BoxDecoration(
+        color: readOnly ? Colors.grey[100] : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: AppDesign.navy.withValues(alpha: 0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(12),
         child: Row(
           children: [
+            // Avatar
+            AppDesign.circleAvatar(
+              icon: Icons.inventory_2_outlined,
+              bgColor: readOnly ? Colors.grey[200]! : AppDesign.tealLight,
+              iconColor: readOnly ? Colors.grey[500]! : AppDesign.tealIcon,
+              size: 36,
+            ),
+            const SizedBox(width: 10),
+            // Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -694,9 +883,9 @@ class _MaterialReceiptDetailScreenState
                   Text(
                     item.itemName.isNotEmpty ? item.itemName : item.itemCode,
                     style: TextStyle(
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w700,
                       fontSize: 13,
-                      color: readOnly ? Colors.grey[600] : null,
+                      color: readOnly ? Colors.grey[600] : AppDesign.navy,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -704,19 +893,25 @@ class _MaterialReceiptDetailScreenState
                   const SizedBox(height: 2),
                   Text(
                     item.itemCode,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                    style: TextStyle(color: Colors.grey[500], fontSize: 11),
                   ),
                 ],
               ),
             ),
+            // Controles
             if (readOnly)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppDesign.accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 child: Text(
                   '${item.qty}',
                   style: const TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w800,
+                    color: AppDesign.navy,
                   ),
                 ),
               )
@@ -724,37 +919,40 @@ class _MaterialReceiptDetailScreenState
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(
-                    onPressed: () =>
-                        provider.updateItemQty(index, item.qty - 1),
-                    icon: const Icon(Icons.remove_circle_outline, size: 20),
-                    color: Colors.red,
-                    padding: const EdgeInsets.all(2),
-                    constraints: const BoxConstraints(
-                      minWidth: 28,
-                      minHeight: 28,
+                  GestureDetector(
+                    onTap: () => provider.updateItemQty(index, item.qty - 1),
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.remove, size: 16, color: Colors.red),
                     ),
                   ),
                   Container(
-                    width: 36,
+                    width: 40,
                     alignment: Alignment.center,
                     child: Text(
                       '${item.qty}',
                       style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: AppDesign.navy,
                       ),
                     ),
                   ),
-                  IconButton(
-                    onPressed: () =>
-                        provider.updateItemQty(index, item.qty + 1),
-                    icon: const Icon(Icons.add_circle_outline, size: 20),
-                    color: Colors.green,
-                    padding: const EdgeInsets.all(2),
-                    constraints: const BoxConstraints(
-                      minWidth: 28,
-                      minHeight: 28,
+                  GestureDetector(
+                    onTap: () => provider.updateItemQty(index, item.qty + 1),
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: AppDesign.greenIcon.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.add, size: 16, color: AppDesign.greenIcon),
                     ),
                   ),
                 ],
