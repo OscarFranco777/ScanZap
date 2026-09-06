@@ -3,8 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../providers/inventory_provider.dart';
 import '../providers/purchase_order_provider.dart';
+import '../theme/app_design.dart';
 
-/// Pantalla de lista de Órdenes de Compra.
+/// Pantalla de lista de Órdenes de Compra — diseño dashboard moderno.
 class PurchaseOrderListScreen extends StatefulWidget {
   const PurchaseOrderListScreen({super.key});
 
@@ -17,7 +18,6 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Sincronizar caché de items del inventario
       final inventoryProvider = context.read<InventoryProvider>();
       final poProvider = context.read<PurchaseOrderProvider>();
       poProvider.loadItemsCache(inventoryProvider.itemsByCode);
@@ -28,51 +28,106 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<PurchaseOrderProvider>();
+    final orders = provider.ordersList;
+
+    // Contar por estado
+    int drafts = 0, submitted = 0, cancelled = 0;
+    for (final o in orders) {
+      final ds = o['docstatus'] ?? 0;
+      if (ds == 0) drafts++;
+      if (ds == 1) submitted++;
+      if (ds == 2) cancelled++;
+    }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('🛒 Órdenes de Compra'),
-        actions: [
-          IconButton(
-            onPressed: () => provider.fetchOrders(),
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Actualizar',
+      backgroundColor: AppDesign.bg,
+      body: Column(
+        children: [
+          // ─── Header ───
+          AppDesign.buildHeader(
+            title: 'Órdenes de Compra',
+            subtitle: '${orders.length} órdenes registradas',
+            icon: Icons.shopping_cart_outlined,
+            onBack: () => Navigator.pop(context),
+            actions: [
+              GestureDetector(
+                onTap: () => provider.fetchOrders(),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.refresh, color: Colors.white, size: 18),
+                ),
+              ),
+              const SizedBox(width: 12),
+            ],
+          ),
+
+          // ─── Stats ───
+          AppDesign.buildStatsCard(
+            children: [
+              AppDesign.buildStatRow(
+                items: [
+                  AppDesign.statBox(
+                    icon: Icons.shopping_cart_outlined,
+                    label: 'TOTAL ÓRDENES',
+                    value: '${orders.length}',
+                  ),
+                  AppDesign.statBox(
+                    icon: Icons.edit_note,
+                    label: 'BORRADORES',
+                    value: '$drafts',
+                    valueColor: AppDesign.statusDraft,
+                  ),
+                ],
+              ),
+              AppDesign.buildStatRow(
+                items: [
+                  AppDesign.statBox(
+                    icon: Icons.check_circle_outline,
+                    label: 'ENVIADAS',
+                    value: '$submitted',
+                    valueColor: AppDesign.statusSubmitted,
+                  ),
+                  AppDesign.statBox(
+                    icon: Icons.cancel_outlined,
+                    label: 'CANCELADAS',
+                    value: '$cancelled',
+                    valueColor: AppDesign.statusCancelled,
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          // ─── Lista ───
+          Expanded(
+            child: provider.isLoading && orders.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : orders.isEmpty
+                    ? AppDesign.emptyState(
+                        icon: Icons.shopping_cart_outlined,
+                        title: 'No hay órdenes de compra',
+                        subtitle: 'Presioná el botón + para crear una nueva',
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () => provider.fetchOrders(),
+                        child: ListView(
+                          padding: const EdgeInsets.only(top: 8, bottom: 100),
+                          children: [
+                            AppDesign.sectionTitle('Lista de Órdenes'),
+                            for (final order in orders)
+                              _buildOrderCard(context, order),
+                          ],
+                        ),
+                      ),
           ),
         ],
       ),
-      body: provider.isLoading && provider.ordersList.isEmpty
-          ? const Center(child: CircularProgressIndicator())
-          : provider.ordersList.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.shopping_cart_outlined, size: 64, color: Colors.grey[300]),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No hay órdenes de compra',
-                        style: TextStyle(color: Colors.grey[500], fontSize: 16),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Presioná + para crear una nueva',
-                        style: TextStyle(color: Colors.grey[400], fontSize: 13),
-                      ),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: () => provider.fetchOrders(),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(8),
-                    itemCount: provider.ordersList.length,
-                    itemBuilder: (context, index) {
-                      final order = provider.ordersList[index];
-                      return _buildOrderCard(context, order);
-                    },
-                  ),
-                ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: AppDesign.fab(
         onPressed: () async {
           context.read<PurchaseOrderProvider>().clearCurrentOrder();
           final result = await Navigator.pushNamed(context, '/po-create');
@@ -80,8 +135,9 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
             context.read<PurchaseOrderProvider>().fetchOrders();
           }
         },
-        icon: const Icon(Icons.add),
-        label: const Text('Nueva Orden'),
+        icon: Icons.add,
+        label: 'Nueva Orden',
+        color: AppDesign.orangeIcon,
       ),
     );
   }
@@ -97,75 +153,78 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
     Color statusColor;
     if (docstatus == 0) {
       statusText = 'Borrador';
-      statusColor = Colors.orange;
+      statusColor = AppDesign.statusDraft;
     } else if (docstatus == 1) {
       statusText = 'Enviada';
-      statusColor = Colors.green;
+      statusColor = AppDesign.statusSubmitted;
     } else {
       statusText = 'Cancelada';
-      statusColor = Colors.red;
+      statusColor = AppDesign.statusCancelled;
     }
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: statusColor.withOpacity(0.1),
-          child: Icon(Icons.shopping_cart, color: statusColor, size: 20),
-        ),
-        title: Text(
-          name,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 2),
-            Text(
-              supplier,
-              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+    return AppDesign.buildListCard(
+      context: context,
+      onTap: () async {
+        context.read<PurchaseOrderProvider>().loadOrder(name);
+        final result = await Navigator.pushNamed(context, '/po-detail');
+        if (result == true && context.mounted) {
+          context.read<PurchaseOrderProvider>().fetchOrders();
+        }
+      },
+      child: Row(
+        children: [
+          // Avatar
+          AppDesign.circleAvatar(
+            icon: Icons.shopping_cart_outlined,
+            bgColor: statusColor,
+            iconColor: statusColor,
+          ),
+          const SizedBox(width: 12),
+          // Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: Color(0xFF1B2A4A),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  supplier,
+                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  date.isNotEmpty
+                      ? DateFormat('dd/MM/yyyy').format(DateTime.tryParse(date) ?? DateTime.now())
+                      : '',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 11),
+                ),
+              ],
             ),
-            Text(
-              date.isNotEmpty ? DateFormat('dd/MM/yyyy').format(DateTime.tryParse(date) ?? DateTime.now()) : '',
-              style: TextStyle(color: Colors.grey[500], fontSize: 11),
-            ),
-          ],
-        ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: statusColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                statusText,
-                style: TextStyle(
-                  color: statusColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
+          ),
+          // Status + Total
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              AppDesign.statusBadge(statusText, statusColor),
+              const SizedBox(height: 6),
+              Text(
+                'L ${total.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  color: Color(0xFF1B2A4A),
                 ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'L ${total.toStringAsFixed(2)}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-            ),
-          ],
-        ),
-        onTap: () async {
-          // Cargar orden y navegar a detalle
-          context.read<PurchaseOrderProvider>().loadOrder(name);
-          final result = await Navigator.pushNamed(context, '/po-detail');
-          // Refrescar lista si hubo cambios (guardado/enviado)
-          if (result == true && context.mounted) {
-            context.read<PurchaseOrderProvider>().fetchOrders();
-          }
-        },
+            ],
+          ),
+        ],
       ),
     );
   }

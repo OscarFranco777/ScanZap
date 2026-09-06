@@ -3,8 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../providers/inventory_provider.dart';
 import '../providers/material_receipt_provider.dart';
+import '../theme/app_design.dart';
 
-/// Pantalla de lista de Recepciones de Mercadería.
+/// Pantalla de lista de Recepciones de Mercadería — diseño dashboard moderno.
 class MaterialReceiptListScreen extends StatefulWidget {
   const MaterialReceiptListScreen({super.key});
 
@@ -27,54 +28,109 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<MaterialReceiptProvider>();
+    final receipts = provider.receiptsList;
+
+    int drafts = 0, submitted = 0, cancelled = 0;
+    for (final r in receipts) {
+      final ds = r['docstatus'] ?? 0;
+      if (ds == 0) drafts++;
+      if (ds == 1) submitted++;
+      if (ds == 2) cancelled++;
+    }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('📦 Recepción de Mercadería'),
-        actions: [
-          IconButton(
-            onPressed: () => provider.fetchReceipts(),
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Actualizar',
+      backgroundColor: AppDesign.bg,
+      body: Column(
+        children: [
+          // ─── Header ───
+          AppDesign.buildHeader(
+            title: 'Recepción de Mercadería',
+            subtitle: '${receipts.length} recepciones registradas',
+            icon: Icons.local_shipping_outlined,
+            onBack: () => Navigator.pop(context),
+            actions: [
+              GestureDetector(
+                onTap: () => provider.fetchReceipts(),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.refresh, color: Colors.white, size: 18),
+                ),
+              ),
+              const SizedBox(width: 12),
+            ],
+          ),
+
+          // ─── Stats ───
+          AppDesign.buildStatsCard(
+            children: [
+              AppDesign.buildStatRow(
+                items: [
+                  AppDesign.statBox(
+                    icon: Icons.local_shipping_outlined,
+                    label: 'TOTAL RECEPCIONES',
+                    value: '${receipts.length}',
+                  ),
+                  AppDesign.statBox(
+                    icon: Icons.edit_note,
+                    label: 'BORRADORES',
+                    value: '$drafts',
+                    valueColor: AppDesign.statusDraft,
+                  ),
+                ],
+              ),
+              AppDesign.buildStatRow(
+                items: [
+                  AppDesign.statBox(
+                    icon: Icons.check_circle_outline,
+                    label: 'ENVIADAS',
+                    value: '$submitted',
+                    valueColor: AppDesign.statusSubmitted,
+                  ),
+                  AppDesign.statBox(
+                    icon: Icons.cancel_outlined,
+                    label: 'CANCELADAS',
+                    value: '$cancelled',
+                    valueColor: AppDesign.statusCancelled,
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          // ─── Lista ───
+          Expanded(
+            child: provider.isLoading && receipts.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : receipts.isEmpty
+                    ? AppDesign.emptyState(
+                        icon: Icons.inbox_outlined,
+                        title: 'No hay recepciones',
+                        subtitle: 'Presioná el botón + para crear una nueva',
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () => provider.fetchReceipts(),
+                        child: ListView(
+                          padding: const EdgeInsets.only(top: 8, bottom: 100),
+                          children: [
+                            AppDesign.sectionTitle('Lista de Recepciones'),
+                            for (final receipt in receipts)
+                              _buildReceiptCard(context, receipt),
+                          ],
+                        ),
+                      ),
           ),
         ],
       ),
-      body: provider.isLoading && provider.receiptsList.isEmpty
-          ? const Center(child: CircularProgressIndicator())
-          : provider.receiptsList.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.inbox_outlined, size: 64, color: Colors.grey[300]),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No hay recepciones',
-                        style: TextStyle(color: Colors.grey[500], fontSize: 16),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Presioná + para crear una nueva',
-                        style: TextStyle(color: Colors.grey[400], fontSize: 13),
-                      ),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: () => provider.fetchReceipts(),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(8),
-                    itemCount: provider.receiptsList.length,
-                    itemBuilder: (context, index) {
-                      final receipt = provider.receiptsList[index];
-                      return _buildReceiptCard(context, receipt);
-                    },
-                  ),
-                ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: AppDesign.fab(
         onPressed: () => _showCreateOptions(context),
-        icon: const Icon(Icons.add),
-        label: const Text('Nueva Recepción'),
+        icon: Icons.add,
+        label: 'Nueva Recepción',
+        color: AppDesign.greenIcon,
       ),
     );
   }
@@ -82,44 +138,102 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
   void _showCreateOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Crear Recepción',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle bar
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            ListTile(
-              leading: Icon(Icons.shopping_cart_outlined, color: Colors.blue),
-              title: Text('Desde Orden de Compra'),
-              subtitle: Text('Seleccionar PO enviada'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _showPOSelection(context);
-              },
-            ),
-            Divider(height: 1),
-            ListTile(
-              leading: Icon(Icons.add_box_outlined, color: Colors.green),
-              title: Text('Recepción Directa'),
-              subtitle: Text('Crear desde cero'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                context.read<MaterialReceiptProvider>().clearCurrentReceipt();
-                context.read<MaterialReceiptProvider>().createNewReceipt();
-                final result = await Navigator.pushNamed(context, '/mr-create');
-                if (result == true && context.mounted) {
-                  context.read<MaterialReceiptProvider>().fetchReceipts();
-                }
-              },
-            ),
-          ],
+              const SizedBox(height: 16),
+              Text(
+                'Crear Recepción',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.grey[800],
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Opción: Desde PO
+              _buildOptionTile(
+                icon: Icons.shopping_cart_outlined,
+                iconBg: AppDesign.blueLight,
+                iconColor: AppDesign.blueIcon,
+                title: 'Desde Orden de Compra',
+                subtitle: 'Seleccionar PO enviada',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showPOSelection(context);
+                },
+              ),
+
+              // Opción: Directa
+              _buildOptionTile(
+                icon: Icons.add_box_outlined,
+                iconBg: AppDesign.greenLight,
+                iconColor: AppDesign.greenIcon,
+                title: 'Recepción Directa',
+                subtitle: 'Crear desde cero',
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  context.read<MaterialReceiptProvider>().clearCurrentReceipt();
+                  context.read<MaterialReceiptProvider>().createNewReceipt();
+                  final result = await Navigator.pushNamed(context, '/mr-create');
+                  if (result == true && context.mounted) {
+                    context.read<MaterialReceiptProvider>().fetchReceipts();
+                  }
+                },
+              ),
+
+              const SizedBox(height: 12),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildOptionTile({
+    required IconData icon,
+    required Color iconBg,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+      leading: AppDesign.circleAvatar(
+        icon: icon,
+        bgColor: iconBg,
+        iconColor: iconColor,
+        size: 44,
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(color: Colors.grey[500], fontSize: 12),
+      ),
+      trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
+      onTap: onTap,
     );
   }
 
@@ -132,57 +246,111 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (ctx) => DraggableScrollableSheet(
         initialChildSize: 0.6,
         maxChildSize: 0.9,
         minChildSize: 0.3,
         expand: false,
-        builder: (ctx, scrollController) => Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Seleccionar Orden de Compra',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        builder: (ctx, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              // Handle bar
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            Expanded(
-              child: provider.submittedPOs.isEmpty
-                  ? Center(child: Text('No hay órdenes enviadas'))
-                  : ListView.builder(
-                      controller: scrollController,
-                      itemCount: provider.submittedPOs.length,
-                      itemBuilder: (context, index) {
-                        final po = provider.submittedPOs[index];
-                        final name = po['name'] ?? '';
-                        final supplier = po['supplier'] ?? '';
-                        final total = (po['grand_total'] ?? 0).toDouble();
-                        return ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: Colors.blue[100],
-                            child: Icon(Icons.shopping_cart, size: 18, color: Colors.blue),
-                          ),
-                          title: Text(name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Text(supplier, style: TextStyle(fontSize: 12)),
-                          trailing: Text(
-                            'L ${total.toStringAsFixed(2)}',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                          ),
-                          onTap: () async {
-                            Navigator.pop(ctx);
-                            await provider.createFromPO(name);
-                            if (context.mounted) {
-                              final result = await Navigator.pushNamed(context, '/mr-create');
-                              if (result == true && context.mounted) {
-                                provider.fetchReceipts();
+              const SizedBox(height: 16),
+              Text(
+                'Seleccionar Orden de Compra',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.grey[800],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: provider.submittedPOs.isEmpty
+                    ? AppDesign.emptyState(
+                        icon: Icons.shopping_cart_outlined,
+                        title: 'No hay órdenes enviadas',
+                      )
+                    : ListView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        itemCount: provider.submittedPOs.length,
+                        itemBuilder: (context, index) {
+                          final po = provider.submittedPOs[index];
+                          final name = po['name'] ?? '';
+                          final supplier = po['supplier'] ?? '';
+                          final total = (po['grand_total'] ?? 0).toDouble();
+                          return AppDesign.buildListCard(
+                            context: context,
+                            onTap: () async {
+                              Navigator.pop(ctx);
+                              await provider.createFromPO(name);
+                              if (context.mounted) {
+                                final result = await Navigator.pushNamed(context, '/mr-create');
+                                if (result == true && context.mounted) {
+                                  provider.fetchReceipts();
+                                }
                               }
-                            }
-                          },
-                        );
-                      },
-                    ),
-            ),
-          ],
+                            },
+                            child: Row(
+                              children: [
+                                AppDesign.circleAvatar(
+                                  icon: Icons.shopping_cart_outlined,
+                                  bgColor: AppDesign.blueLight,
+                                  iconColor: AppDesign.blueIcon,
+                                  size: 38,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      Text(
+                                        supplier,
+                                        style: TextStyle(
+                                          color: Colors.grey[500],
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  'L ${total.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -197,52 +365,56 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
     Color statusColor;
     if (docstatus == 0) {
       statusText = 'Borrador';
-      statusColor = Colors.orange;
+      statusColor = AppDesign.statusDraft;
     } else if (docstatus == 1) {
       statusText = 'Enviada';
-      statusColor = Colors.green;
+      statusColor = AppDesign.statusSubmitted;
     } else {
       statusText = 'Cancelada';
-      statusColor = Colors.red;
+      statusColor = AppDesign.statusCancelled;
     }
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: statusColor.withOpacity(0.1),
-          child: Icon(Icons.inventory_2, color: statusColor, size: 20),
-        ),
-        title: Text(
-          name,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-        ),
-        subtitle: Text(
-          date.isNotEmpty ? DateFormat('dd/MM/yyyy').format(DateTime.tryParse(date) ?? DateTime.now()) : '',
-          style: TextStyle(color: Colors.grey[500], fontSize: 12),
-        ),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(
-            color: statusColor.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
+    return AppDesign.buildListCard(
+      context: context,
+      onTap: () async {
+        context.read<MaterialReceiptProvider>().loadReceipt(name);
+        final result = await Navigator.pushNamed(context, '/mr-detail');
+        if (result == true && context.mounted) {
+          context.read<MaterialReceiptProvider>().fetchReceipts();
+        }
+      },
+      child: Row(
+        children: [
+          AppDesign.circleAvatar(
+            icon: Icons.local_shipping_outlined,
+            bgColor: statusColor,
+            iconColor: statusColor,
           ),
-          child: Text(
-            statusText,
-            style: TextStyle(
-              color: statusColor,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: Color(0xFF1B2A4A),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  date.isNotEmpty
+                      ? DateFormat('dd/MM/yyyy').format(DateTime.tryParse(date) ?? DateTime.now())
+                      : '',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                ),
+              ],
             ),
           ),
-        ),
-        onTap: () async {
-          context.read<MaterialReceiptProvider>().loadReceipt(name);
-          final result = await Navigator.pushNamed(context, '/mr-detail');
-          if (result == true && context.mounted) {
-            context.read<MaterialReceiptProvider>().fetchReceipts();
-          }
-        },
+          AppDesign.statusBadge(statusText, statusColor),
+        ],
       ),
     );
   }

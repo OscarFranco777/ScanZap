@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import '../providers/inventory_provider.dart';
 import '../models/inventory_row.dart';
+import '../theme/app_design.dart';
 
 /// Terminal de escaneo de código de barras con cámara del dispositivo.
 /// Optimizada para dispositivos de gama baja/media.
@@ -266,30 +267,18 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      appBar: AppBar(
-        title: Text(
-          '📦 Inventario — ${provider.uniqueProducts} productos',
-          style: TextStyle(fontSize: screenW < 360 ? 14 : 16),
-        ),
-        actions: [
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Text(
-                '${provider.totalUnitsScanned} uds | L${provider.totalInventoryValue.toStringAsFixed(2)}',
-                style: TextStyle(
-                  fontSize: screenW < 360 ? 11 : 13,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
+      backgroundColor: AppDesign.bg,
+      body: Column(
+        children: [
+          // ─── Header personalizado ───
+          AppDesign.buildHeader(
+            title: 'Gestión de Inventario',
+            subtitle: '${provider.uniqueProducts} productos • ${provider.totalUnitsScanned} uds • L${provider.totalInventoryValue.toStringAsFixed(2)}',
+            icon: Icons.qr_code_scanner,
+            onBack: () => Navigator.pop(context),
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // ─── ZONA DE CÁMARA ───
+
+          // ─── ZONA DE CÁMARA ───
             if (_cameraActive)
               SizedBox(
                 height: _getCameraHeight(context),
@@ -584,7 +573,6 @@ class _ScannerScreenState extends State<ScannerScreen> {
             ),
           ],
         ),
-      ),
     );
   }
 
