@@ -14,6 +14,8 @@ class PurchaseOrderListScreen extends StatefulWidget {
 }
 
 class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
+  bool _statsExpanded = false;
+
   @override
   void initState() {
     super.initState();
@@ -66,41 +68,109 @@ class _PurchaseOrderListScreenState extends State<PurchaseOrderListScreen> {
             ],
           ),
 
-          // ─── Stats ───
-          AppDesign.buildStatsCard(
-            children: [
-              AppDesign.buildStatRow(
-                items: [
-                  AppDesign.statBox(
-                    icon: Icons.shopping_cart_outlined,
-                    label: 'TOTAL ÓRDENES',
-                    value: '${orders.length}',
-                  ),
-                  AppDesign.statBox(
-                    icon: Icons.edit_note,
-                    label: 'BORRADORES',
-                    value: '$drafts',
-                    valueColor: AppDesign.statusDraft,
-                  ),
-                ],
+          // ─── Stats (colapsable) ───
+          GestureDetector(
+            onTap: () => setState(() => _statsExpanded = !_statsExpanded),
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppDesign.navy,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppDesign.navy.withValues(alpha: 0.25),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    // Header toggle
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.analytics_outlined,
+                            size: 16,
+                            color: AppDesign.accent,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Resumen de Órdenes',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const Spacer(),
+                          AnimatedRotation(
+                            turns: _statsExpanded ? 0.5 : 0,
+                            duration: const Duration(milliseconds: 250),
+                            child: Icon(
+                              Icons.keyboard_arrow_down,
+                              size: 18,
+                              color: Colors.white.withValues(alpha: 0.6),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Stats content (animated)
+                    if (_statsExpanded)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                        child: Column(
+                          children: [
+                            AppDesign.buildStatRow(
+                              compact: true,
+                              items: [
+                                AppDesign.statBox(
+                                  icon: Icons.shopping_cart_outlined,
+                                  label: 'TOTAL ÓRDENES',
+                                  value: '${orders.length}',
+                                  compact: true,
+                                ),
+                                AppDesign.statBox(
+                                  icon: Icons.edit_note,
+                                  label: 'BORRADORES',
+                                  value: '$drafts',
+                                  valueColor: AppDesign.statusDraft,
+                                  compact: true,
+                                ),
+                              ],
+                            ),
+                            AppDesign.buildStatRow(
+                              compact: true,
+                              items: [
+                                AppDesign.statBox(
+                                  icon: Icons.check_circle_outline,
+                                  label: 'ENVIADAS',
+                                  value: '$submitted',
+                                  valueColor: AppDesign.statusSubmitted,
+                                  compact: true,
+                                ),
+                                AppDesign.statBox(
+                                  icon: Icons.cancel_outlined,
+                                  label: 'CANCELADAS',
+                                  value: '$cancelled',
+                                  valueColor: AppDesign.statusCancelled,
+                                  compact: true,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              AppDesign.buildStatRow(
-                items: [
-                  AppDesign.statBox(
-                    icon: Icons.check_circle_outline,
-                    label: 'ENVIADAS',
-                    value: '$submitted',
-                    valueColor: AppDesign.statusSubmitted,
-                  ),
-                  AppDesign.statBox(
-                    icon: Icons.cancel_outlined,
-                    label: 'CANCELADAS',
-                    value: '$cancelled',
-                    valueColor: AppDesign.statusCancelled,
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
 
           // ─── Lista ───

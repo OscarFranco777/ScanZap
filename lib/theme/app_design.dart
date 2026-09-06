@@ -113,13 +113,13 @@ class AppDesign {
   // STATS CARD — tarjeta oscura con métricas
   // ══════════════════════════════════════════════════════════════
 
-  static Widget buildStatsCard({required List<Widget> children}) {
+  static Widget buildStatsCard({required List<Widget> children, bool compact = false}) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      padding: compact ? const EdgeInsets.all(8) : const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: navy,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
             color: navy.withValues(alpha: 0.25),
@@ -132,13 +132,13 @@ class AppDesign {
     );
   }
 
-  static Widget buildStatRow({required List<Widget> items}) {
+  static Widget buildStatRow({required List<Widget> items, bool compact = false}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(bottom: compact ? 4 : 10),
       child: Row(
         children: [
           for (int i = 0; i < items.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
+            if (i > 0) SizedBox(width: compact ? 4 : 8),
             Expanded(child: items[i]),
           ],
         ],
@@ -152,25 +152,26 @@ class AppDesign {
     required String value,
     Color? valueColor,
     bool smallValue = false,
+    bool compact = false,
   }) {
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: compact ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6) : const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
         children: [
           Container(
-            width: 32,
-            height: 32,
+            width: compact ? 24 : 32,
+            height: compact ? 24 : 32,
             decoration: BoxDecoration(
               color: accent.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(6),
             ),
-            child: Icon(icon, size: 16, color: accent),
+            child: Icon(icon, size: compact ? 12 : 16, color: accent),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: compact ? 6 : 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,7 +180,7 @@ class AppDesign {
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: 8,
+                    fontSize: compact ? 7 : 8,
                     fontWeight: FontWeight.w700,
                     color: Colors.white.withValues(alpha: 0.5),
                     letterSpacing: 0.6,
@@ -187,11 +188,11 @@ class AppDesign {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 2),
+                SizedBox(height: compact ? 1 : 2),
                 Text(
                   value,
                   style: TextStyle(
-                    fontSize: smallValue ? 11 : 16,
+                    fontSize: smallValue ? 11 : (compact ? 13 : 16),
                     fontWeight: FontWeight.w800,
                     color: valueColor ?? Colors.white,
                   ),
