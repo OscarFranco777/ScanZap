@@ -15,6 +15,10 @@ class MaterialReceiptProvider with ChangeNotifier {
   bool isSaved = false;
   bool isSubmitted = false;
 
+  // ─── Loading para creación desde PO ───
+  bool _loadingReceipt = false;
+  bool get loadingReceipt => _loadingReceipt;
+
   // ─── Recepción actual (en edición) ───
   MaterialReceipt? currentReceipt;
 
@@ -127,7 +131,8 @@ class MaterialReceiptProvider with ChangeNotifier {
   }
 
   /// Crea una recepción desde los items de una Purchase Order enviada.
-  Future<void> createFromPO(String poName, {String warehouse = '', String supplier = '', String supplierId = ''}) async {
+  Future<void> createFromPO(String poName, {String warehouse = '', String supplier = '', String supplierId = '', String namingSeries = '', String costCenter = ''}) async {
+    _loadingReceipt = true;
     isLoading = true;
     error = '';
     notifyListeners();
@@ -155,30 +160,29 @@ class MaterialReceiptProvider with ChangeNotifier {
         supplier: supplier,
         supplierId: supplierId.isNotEmpty ? supplierId : supplier,
         purchaseOrder: poName,
+        namingSeries: namingSeries,
+        costCenter: costCenter,
         items: receiptItems,
       );
     } catch (e) {
       error = 'Error cargando items de PO: $e';
     }
 
+    _loadingReceipt = false;
     isLoading = false;
     notifyListeners();
   }
 
   /// Carga una recepción existente desde ERPNext.
   Future<void> loadReceipt(String name) async {
+    _loadingReceipt = true;
     isLoading = true;
     error = '';
     notifyListeners();
 
     try {
-      // Intentar como Purchase Receipt primero (creado desde PO)
-      Map<String, dynamic>? data;
-      if (name.toUpperCase().contains('PRE') || name.toUpperCase().contains('PR')) {
-        data = await erpNextService.getPurchaseReceipt(name);
-      }
-      // Si no se encontró o es Stock Entry, intentar como Stock Entry
-      data ??= await erpNextService.getMaterialReceipt(name);
+      // Purchase Receipt (el único tipo que usamos)
+      final data = await erpNextService.getPurchaseReceipt(name);
 
       if (data != null) {
         currentReceipt = MaterialReceipt.fromErp(data);
@@ -191,6 +195,7 @@ class MaterialReceiptProvider with ChangeNotifier {
       error = 'Error cargando recepción: $e';
     }
 
+    _loadingReceipt = false;
     isLoading = false;
     notifyListeners();
   }

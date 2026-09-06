@@ -722,134 +722,6 @@ class ErpNextService {
     }
   }
 
-  /// Obtiene un Stock Entry por nombre.
-  Future<Map<String, dynamic>?> getMaterialReceipt(String name) async {
-    try {
-      final response = await _dio.get(
-        '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
-      );
-      if (response.statusCode == 200) {
-        return response.data?['data'];
-      }
-      return null;
-    } catch (e) {
-      print('[Service] getMaterialReceipt error: $e');
-      return null;
-    }
-  }
-
-  /// Crea un Stock Entry tipo "Material Receipt" como borrador.
-  Future<Map<String, dynamic>> createMaterialReceipt({
-    required String warehouse,
-    required List<Map<String, dynamic>> items,
-    String? namingSeries,
-    String? supplier,
-    String? costCenter,
-  }) async {
-    final doc = {
-      'doctype': 'Stock Entry',
-      'stock_entry_type': 'Material Receipt',
-      'posting_date': DateTime.now().toIso8601String().substring(0, 10),
-      if (namingSeries != null && namingSeries.isNotEmpty)
-        'naming_series': namingSeries,
-      if (supplier != null && supplier.isNotEmpty) 'supplier': supplier,
-      if (costCenter != null && costCenter.isNotEmpty)
-        'cost_center': costCenter,
-      'items': items
-          .map(
-            (item) => {
-              'doctype': 'Stock Entry Detail',
-              'item_code': item['item_code'],
-              'qty': item['qty'],
-              't_warehouse': warehouse,
-              if (item['uom'] != null) 'uom': item['uom'],
-            },
-          )
-          .toList(),
-    };
-
-    final response = await _dio.post(
-      '$baseUrl/api/resource/Stock%20Entry',
-      data: doc,
-    );
-
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return response.data['data'] ?? {};
-    }
-    throw Exception('Error creando recepción: ${response.data}');
-  }
-
-  /// Actualiza un Stock Entry borrador existente.
-  Future<Map<String, dynamic>> updateMaterialReceipt({
-    required String name,
-    required List<Map<String, dynamic>> items,
-  }) async {
-    final doc = {
-      'items': items
-          .map(
-            (item) => {
-              'doctype': 'Stock Entry Detail',
-              'item_code': item['item_code'],
-              'qty': item['qty'],
-              't_warehouse': item['t_warehouse'],
-              if (item['uom'] != null) 'uom': item['uom'],
-            },
-          )
-          .toList(),
-    };
-
-    final response = await _dio.put(
-      '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
-      data: doc,
-    );
-
-    if (response.statusCode == 200) {
-      return response.data['data'] ?? {};
-    }
-    throw Exception('Error actualizando recepción: ${response.data}');
-  }
-
-  /// Hace submit de un Stock Entry (borrador → submitted).
-  Future<Map<String, dynamic>> submitMaterialReceipt(String name) async {
-    try {
-      // Paso 1: Obtener el documento completo
-      final docResponse = await _dio.get(
-        '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
-      );
-      if (docResponse.statusCode != 200 || docResponse.data?['data'] == null) {
-        throw Exception('No se pudo obtener la recepción $name para enviar');
-      }
-      final Map<String, dynamic> doc = docResponse.data['data'];
-
-      // Paso 2: Enviar
-      final response = await _dio.post(
-        '$baseUrl/api/method/frappe.client.submit',
-        data: {'doctype': 'Stock Entry', 'docname': name, 'doc': doc},
-      );
-      if (response.statusCode == 200) {
-        return response.data['data'] ?? {};
-      }
-      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
-    } on DioException catch (e) {
-      String detail = '';
-      if (e.response?.data != null) {
-        if (e.response!.data is Map) {
-          detail =
-              e.response!.data['exc'] ??
-              e.response!.data['_server_messages'] ??
-              e.response!.data['message'] ??
-              e.response!.data.toString();
-        } else {
-          detail = e.response!.data.toString();
-        }
-      }
-      if (detail.isNotEmpty) {
-        throw Exception('Servidor: $detail');
-      }
-      throw Exception('Error HTTP ${e.response?.statusCode}: ${e.message}');
-    }
-  }
-
   /// Lista Purchase Orders enviadas (docstatus=1) para crear recepción desde PO.
   Future<List<Map<String, dynamic>>> listSubmittedPurchaseOrders({
     int limit = 50,
@@ -893,6 +765,24 @@ class ErpNextService {
     } catch (e) {
       print('[Service] getPurchaseOrderItems error: $e');
       return [];
+    }
+  }
+
+  /// Obtiene el detalle de una PO para pre-llenar el modal de nueva recepción.
+  /// Retorna null si no se encuentra la PO.
+  Future<Map<String, dynamic>?> getPODetailsForNewReceipt(String poName) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(poName)}',
+        queryParameters: {'fields': '["name","supplier","set_warehouse","cost_center"]'},
+      );
+      if (response.statusCode == 200) {
+        return response.data?['data'];
+      }
+      return null;
+    } catch (e) {
+      print('[Service] getPODetailsForNewReceipt error: $e');
+      return null;
     }
   }
 

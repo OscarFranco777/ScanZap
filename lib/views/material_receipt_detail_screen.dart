@@ -21,8 +21,7 @@ class MaterialReceiptDetailScreen extends StatefulWidget {
 
 class _MaterialReceiptDetailScreenState
     extends State<MaterialReceiptDetailScreen> {
-  // ─── Origen ───
-  bool _fromPO = false;
+
 
   // ─── Cámara ───
   MobileScannerController? _cameraController;
@@ -32,6 +31,7 @@ class _MaterialReceiptDetailScreenState
   Timer? _lockTimer;
 
   // ─── Formulario ───
+  String _pendingPOName = '';
   final _supplierController = TextEditingController();
   String _selectedSupplierId = '';
   final _scanController = TextEditingController();
@@ -54,16 +54,25 @@ class _MaterialReceiptDetailScreenState
       torchEnabled: false,
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Leer argumento de la ruta
-      final args = ModalRoute.of(context)?.settings.arguments;
-      if (args is Map<String, dynamic>) {
-        _fromPO = args['fromPO'] == true;
-      }
-
       final inventoryProvider = context.read<InventoryProvider>();
       final mrProvider = context.read<MaterialReceiptProvider>();
       mrProvider.loadItemsCache(inventoryProvider.itemsByCode);
-      mrProvider.fetchCatalogs();
+      mrProvider.fetchCatalogs().then((_) {
+        // Si no hay serie seleccionada, usar la primera disponible
+        if (mounted && _selectedNamingSeries.isEmpty && mrProvider.namingSeriesOptions.isNotEmpty) {
+          setState(() => _selectedNamingSeries = mrProvider.namingSeriesOptions.first);
+        }
+      });
+
+      // Si viene con datos de PO, crear receipt automáticamente
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map<String, dynamic> && args['poName'] != null) {
+        _supplierController.text = args['supplier'] ?? '';
+        _selectedSupplierId = args['supplierId'] ?? '';
+        _selectedWarehouse = args['warehouse'] ?? '';
+        _selectedCostCenter = args['costCenter'] ?? '';
+        _pendingPOName = args['poName'];
+      }
     });
   }
 
@@ -182,15 +191,32 @@ class _MaterialReceiptDetailScreenState
               ? provider.namingSeriesOptions.first
               : '');
 
-    provider.createNewReceipt(
-      supplier: _supplierController.text.trim(),
-      supplierId: _selectedSupplierId,
-      warehouse: _selectedWarehouse,
-      namingSeries: namingSeries,
-      costCenter: _selectedCostCenter,
-      postingDate: _selectedDate,
-    );
-    setState(() => _showForm = false);
+    // Si viene desde PO, crear con datos pre-cargados
+    if (_pendingPOName.isNotEmpty) {
+      provider.createFromPO(
+        _pendingPOName,
+        supplier: _supplierController.text.trim(),
+        supplierId: _selectedSupplierId,
+        warehouse: _selectedWarehouse,
+        namingSeries: namingSeries,
+        costCenter: _selectedCostCenter,
+      ).then((_) {
+        if (mounted) {
+          setState(() => _showForm = false);
+        }
+      });
+    } else {
+      // Creación directa
+      provider.createNewReceipt(
+        supplier: _supplierController.text.trim(),
+        supplierId: _selectedSupplierId,
+        warehouse: _selectedWarehouse,
+        namingSeries: namingSeries,
+        costCenter: _selectedCostCenter,
+        postingDate: _selectedDate,
+      );
+      setState(() => _showForm = false);
+    }
   }
 
   Future<void> _saveReceipt() async {
@@ -345,9 +371,26 @@ class _MaterialReceiptDetailScreenState
 
           // ─── Body ───
           Expanded(
-            child: _showForm && receipt == null && !_fromPO
-                ? _buildCreationForm()
-                : _buildReceiptDetail(),
+            child: provider.loadingReceipt
+                ? const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 12),
+                        Text(
+                          'Cargando datos de la PO...',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : _showForm && receipt == null
+                    ? _buildCreationForm()
+                    : _buildReceiptDetail(),
           ),
         ],
       ),
