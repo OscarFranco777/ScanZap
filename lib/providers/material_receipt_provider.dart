@@ -30,8 +30,12 @@ class MaterialReceiptProvider with ChangeNotifier {
   // ─── Almacenes ───
   List<Map<String, dynamic>> warehouses = [];
 
+  // ─── Centros de costo ───
+  List<Map<String, dynamic>> costCenters = [];
+
   // ─── Naming series ───
   List<String> namingSeriesOptions = [];
+  bool catalogsLoaded = false;
 
   // ─── Último escaneo ───
   String lastScannedCode = '';
@@ -65,19 +69,27 @@ class MaterialReceiptProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Carga catálogos (almacenes y naming series) desde ERPNext.
+  /// Carga catálogos (almacenes, naming series PR, centros de costo) desde ERPNext.
   Future<void> fetchCatalogs() async {
     try {
       final results = await Future.wait([
         erpNextService.fetchWarehouses(),
-        erpNextService.fetchNamingSeries('Stock Entry'),
+        erpNextService.fetchPurchaseReceiptNamingSeries(),
+        erpNextService.fetchCostCenters(),
       ]);
       warehouses = List<Map<String, dynamic>>.from(results[0] as List);
       namingSeriesOptions = List<String>.from(results[1] as List);
+      costCenters = List<Map<String, dynamic>>.from(results[2] as List);
+      catalogsLoaded = true;
     } catch (e) {
       print('[MR] Error cargando catálogos: $e');
     }
     notifyListeners();
+  }
+
+  /// Busca proveedores por nombre.
+  Future<List<Map<String, dynamic>>> searchSuppliers(String query) async {
+    return await erpNextService.searchSuppliers(query);
   }
 
   /// Carga Purchase Orders enviadas para crear recepción desde PO.
@@ -94,10 +106,20 @@ class MaterialReceiptProvider with ChangeNotifier {
   void createNewReceipt({
     String warehouse = '',
     String supplier = '',
+    String supplierId = '',
+    String purchaseOrder = '',
+    String namingSeries = '',
+    String costCenter = '',
+    DateTime? postingDate,
   }) {
     currentReceipt = MaterialReceipt(
       warehouse: warehouse,
       supplier: supplier,
+      supplierId: supplierId,
+      purchaseOrder: purchaseOrder,
+      namingSeries: namingSeries,
+      costCenter: costCenter,
+      postingDate: postingDate ?? DateTime.now(),
     );
     isSaved = false;
     isSubmitted = false;
@@ -105,7 +127,7 @@ class MaterialReceiptProvider with ChangeNotifier {
   }
 
   /// Crea una recepción desde los items de una Purchase Order enviada.
-  Future<void> createFromPO(String poName, {String warehouse = ''}) async {
+  Future<void> createFromPO(String poName, {String warehouse = '', String supplier = '', String supplierId = ''}) async {
     isLoading = true;
     error = '';
     notifyListeners();
@@ -123,8 +145,16 @@ class MaterialReceiptProvider with ChangeNotifier {
         );
       }).toList();
 
+      // Si no se pasó warehouse, tomar del primer item
+      final effectiveWarehouse = warehouse.isNotEmpty
+          ? warehouse
+          : (receiptItems.isNotEmpty ? receiptItems.first.warehouse : '');
+
       currentReceipt = MaterialReceipt(
-        warehouse: warehouse,
+        warehouse: effectiveWarehouse,
+        supplier: supplier,
+        supplierId: supplierId.isNotEmpty ? supplierId : supplier,
+        purchaseOrder: poName,
         items: receiptItems,
       );
     } catch (e) {
@@ -142,7 +172,14 @@ class MaterialReceiptProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final data = await erpNextService.getMaterialReceipt(name);
+      // Intentar como Purchase Receipt primero (creado desde PO)
+      Map<String, dynamic>? data;
+      if (name.toUpperCase().contains('PRE') || name.toUpperCase().contains('PR')) {
+        data = await erpNextService.getPurchaseReceipt(name);
+      }
+      // Si no se encontró o es Stock Entry, intentar como Stock Entry
+      data ??= await erpNextService.getMaterialReceipt(name);
+
       if (data != null) {
         currentReceipt = MaterialReceipt.fromErp(data);
         isSaved = currentReceipt!.id != null;
@@ -274,21 +311,44 @@ class MaterialReceiptProvider with ChangeNotifier {
       Map<String, dynamic> result;
 
       if (isSaved && currentReceipt!.id != null) {
-        result = await erpNextService.updateMaterialReceipt(
+        result = await erpNextService.updatePurchaseReceipt(
           name: currentReceipt!.id!,
           items: items,
         );
       } else {
-        result = await erpNextService.createMaterialReceipt(
-          warehouse: currentReceipt!.warehouse,
-          items: items,
-          supplier: currentReceipt!.supplier,
-        );
+        // Crear como Purchase Receipt
+        if (currentReceipt!.purchaseOrder.isNotEmpty) {
+          // Con PO vinculada
+          result = await erpNextService.createPurchaseReceipt(
+            purchaseOrder: currentReceipt!.purchaseOrder,
+            supplier: currentReceipt!.supplierId.isNotEmpty
+                ? currentReceipt!.supplierId
+                : currentReceipt!.supplier,
+            warehouse: currentReceipt!.warehouse,
+            items: items,
+            namingSeries: currentReceipt!.namingSeries,
+            costCenter: currentReceipt!.costCenter,
+          );
+        } else {
+          // Sin PO — creación directa
+          result = await erpNextService.createDirectPurchaseReceipt(
+            supplier: currentReceipt!.supplierId.isNotEmpty
+                ? currentReceipt!.supplierId
+                : currentReceipt!.supplier,
+            warehouse: currentReceipt!.warehouse,
+            items: items,
+            namingSeries: currentReceipt!.namingSeries,
+            costCenter: currentReceipt!.costCenter,
+          );
+        }
       }
 
       currentReceipt!.id = result['name'];
       currentReceipt!.status = 'Borrador';
       isSaved = true;
+
+      // Refrescar la lista de recepciones para que aparezca la nueva
+      fetchReceipts();
 
       isLoading = false;
       notifyListeners();
@@ -326,9 +386,13 @@ class MaterialReceiptProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      await erpNextService.submitMaterialReceipt(currentReceipt!.id!);
+      await erpNextService.submitPurchaseReceipt(currentReceipt!.id!);
       currentReceipt!.status = 'Enviada';
       isSubmitted = true;
+
+      // Refrescar la lista de recepciones para que actualice el estado
+      fetchReceipts();
+
       isLoading = false;
       notifyListeners();
       return true;

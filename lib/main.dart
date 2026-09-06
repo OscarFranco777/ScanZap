@@ -46,6 +46,7 @@ class InventarioApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Inventario ERPNext',
         debugShowCheckedModeBanner: false,
+
         theme: ThemeData(
           colorSchemeSeed: const Color(0xFF1976D2),
           useMaterial3: true,

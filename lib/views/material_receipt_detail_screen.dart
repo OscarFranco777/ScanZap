@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import '../providers/inventory_provider.dart';
 import '../providers/material_receipt_provider.dart';
 import '../models/material_receipt.dart';
@@ -20,6 +21,9 @@ class MaterialReceiptDetailScreen extends StatefulWidget {
 
 class _MaterialReceiptDetailScreenState
     extends State<MaterialReceiptDetailScreen> {
+  // ─── Origen ───
+  bool _fromPO = false;
+
   // ─── Cámara ───
   MobileScannerController? _cameraController;
   bool _cameraActive = true;
@@ -28,12 +32,18 @@ class _MaterialReceiptDetailScreenState
   Timer? _lockTimer;
 
   // ─── Formulario ───
+  final _supplierController = TextEditingController();
+  String _selectedSupplierId = '';
   final _scanController = TextEditingController();
   final _qtyController = TextEditingController(text: '1');
   bool _showForm = true;
 
   // ─── Campos ───
   String _selectedWarehouse = '';
+  String _selectedCostCenter = '';
+  String _selectedNamingSeries = '';
+  DateTime _selectedDate = DateTime.now();
+  List<Map<String, dynamic>> _supplierSuggestions = [];
 
   @override
   void initState() {
@@ -44,6 +54,12 @@ class _MaterialReceiptDetailScreenState
       torchEnabled: false,
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Leer argumento de la ruta
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map<String, dynamic>) {
+        _fromPO = args['fromPO'] == true;
+      }
+
       final inventoryProvider = context.read<InventoryProvider>();
       final mrProvider = context.read<MaterialReceiptProvider>();
       mrProvider.loadItemsCache(inventoryProvider.itemsByCode);
@@ -55,6 +71,7 @@ class _MaterialReceiptDetailScreenState
   void dispose() {
     _cameraController?.dispose();
     _lockTimer?.cancel();
+    _supplierController.dispose();
     _scanController.dispose();
     _qtyController.dispose();
     super.dispose();
@@ -103,19 +120,76 @@ class _MaterialReceiptDetailScreenState
   // ACCIONES
   // ══════════════════════════════════════════════════════════════
 
+  Future<void> _selectDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null) {
+      setState(() => _selectedDate = picked);
+    }
+  }
+
+  void _searchSuppliers(String query) async {
+    if (query.length < 2) {
+      setState(() => _supplierSuggestions = []);
+      return;
+    }
+    final provider = context.read<MaterialReceiptProvider>();
+    final results = await provider.searchSuppliers(query);
+    if (mounted) {
+      setState(() => _supplierSuggestions = results);
+    }
+  }
+
   void _startDirectCreation() {
+    if (_supplierController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('⚠️ Seleccioná un proveedor'),
+          backgroundColor: AppDesign.orangeIcon,
+        ),
+      );
+      return;
+    }
+
     if (_selectedWarehouse.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⚠️ Seleccioná un almacén destino'),
-          backgroundColor: Colors.orange,
+        SnackBar(
+          content: const Text('⚠️ Seleccioná un almacén destino'),
+          backgroundColor: AppDesign.orangeIcon,
+        ),
+      );
+      return;
+    }
+
+    if (_selectedCostCenter.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('⚠️ Seleccioná un centro de costos'),
+          backgroundColor: AppDesign.orangeIcon,
         ),
       );
       return;
     }
 
     final provider = context.read<MaterialReceiptProvider>();
-    provider.createNewReceipt(warehouse: _selectedWarehouse);
+    final namingSeries = _selectedNamingSeries.isNotEmpty
+        ? _selectedNamingSeries
+        : (provider.namingSeriesOptions.isNotEmpty
+              ? provider.namingSeriesOptions.first
+              : '');
+
+    provider.createNewReceipt(
+      supplier: _supplierController.text.trim(),
+      supplierId: _selectedSupplierId,
+      warehouse: _selectedWarehouse,
+      namingSeries: namingSeries,
+      costCenter: _selectedCostCenter,
+      postingDate: _selectedDate,
+    );
     setState(() => _showForm = false);
   }
 
@@ -271,7 +345,7 @@ class _MaterialReceiptDetailScreenState
 
           // ─── Body ───
           Expanded(
-            child: _showForm && receipt == null
+            child: _showForm && receipt == null && !_fromPO
                 ? _buildCreationForm()
                 : _buildReceiptDetail(),
           ),
@@ -280,166 +354,365 @@ class _MaterialReceiptDetailScreenState
     );
   }
 
-  /// Formulario de creación (recepción directa).
+  /// Formulario de creación (recepción directa) — igual al de OC.
   Widget _buildCreationForm() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ─── Icono y título ───
-          Center(
-            child: AppDesign.circleAvatar(
-              icon: Icons.inventory_2_outlined,
-              bgColor: AppDesign.tealLight,
-              iconColor: AppDesign.tealIcon,
-              size: 56,
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Crear Recepción de Mercadería',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-              color: AppDesign.navy,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Seleccioná el almacén destino para empezar',
-            style: TextStyle(color: Colors.grey[500], fontSize: 13),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-
-          // ─── Almacén destino ───
+          // ─── Card central con ícono ───
           Container(
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
+              color: AppDesign.cardWhite,
+              borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: AppDesign.navy.withValues(alpha: 0.06),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.all(16),
-            child: Consumer<MaterialReceiptProvider>(
-              builder: (context, mrProvider, _) {
-                final warehouses = mrProvider.warehouses;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        AppDesign.circleAvatar(
-                          icon: Icons.warehouse_outlined,
-                          bgColor: AppDesign.tealLight,
-                          iconColor: AppDesign.tealIcon,
-                          size: 32,
-                        ),
-                        const SizedBox(width: 10),
-                        const Text(
-                          'Almacén Destino *',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13,
-                            color: AppDesign.navy,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      isDense: true,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: Colors.grey[300]!),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: Colors.grey[300]!),
-                        ),
-                        filled: true,
-                        fillColor: Colors.grey[50],
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                      ),
-                      initialValue: _selectedWarehouse.isNotEmpty
-                          ? _selectedWarehouse
-                          : null,
-                      hint: Text(
-                        'Seleccioná almacén',
-                        style: TextStyle(color: Colors.grey[500], fontSize: 13),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      icon: const Icon(Icons.arrow_drop_down, size: 20),
-                      items: warehouses.map<DropdownMenuItem<String>>((w) {
-                        final name = w['name'] ?? '';
-                        final displayName = w['warehouse_name'] ?? name;
-                        return DropdownMenuItem(
-                          value: name,
-                          child: Text(
-                            displayName,
-                            style: const TextStyle(fontSize: 13),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (val) {
-                        setState(() => _selectedWarehouse = val ?? '');
-                      },
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // ─── Botón crear ───
-          Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: AppDesign.navy.withValues(alpha: 0.2),
-                  blurRadius: 10,
+                  color: AppDesign.navy.withValues(alpha: 0.08),
+                  blurRadius: 16,
                   offset: const Offset(0, 4),
                 ),
               ],
             ),
-            child: SizedBox(
-              height: 50,
-              child: ElevatedButton.icon(
-                onPressed: _startDirectCreation,
-                icon: const Icon(Icons.arrow_forward, size: 20),
-                label: const Text(
-                  'Crear y Escanear',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            child: Column(
+              children: [
+                AppDesign.circleAvatar(
+                  icon: Icons.local_shipping_outlined,
+                  bgColor: AppDesign.tealLight,
+                  iconColor: AppDesign.tealIcon,
+                  size: 56,
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppDesign.navy,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                const SizedBox(height: 12),
+                const Text(
+                  'Crear Recepción de Mercadería',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: AppDesign.navy,
                   ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Completá los datos para generar la recepción',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[500],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ─── Serie de Numeración ───
+          _buildSectionLabel('SERIE DE NUMERACIÓN'),
+          const SizedBox(height: 6),
+          Consumer<MaterialReceiptProvider>(
+            builder: (context, mrProvider, _) {
+              final series = mrProvider.namingSeriesOptions;
+              final loaded = mrProvider.catalogsLoaded;
+              if (!loaded) {
+                return _buildDropdownField(
+                  label: 'Serie de Numeración *',
+                  icon: Icons.tag,
+                  hint: 'Cargando...',
+                  items: const [],
+                  value: null,
+                  enabled: false,
+                );
+              }
+              if (series.isEmpty) {
+                return _buildDropdownField(
+                  label: 'Serie de Numeración *',
+                  icon: Icons.tag,
+                  hint: 'No hay series disponibles',
+                  items: const [],
+                  value: null,
+                  enabled: false,
+                );
+              }
+              final currentVal = (series.contains(_selectedNamingSeries))
+                  ? _selectedNamingSeries
+                  : series.first;
+              return _buildDropdownField(
+                label: 'Serie de Numeración *',
+                icon: Icons.tag,
+                hint: 'Seleccionar serie',
+                items: series.map((s) => DropdownMenuItem(
+                  value: s,
+                  child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis),
+                )).toList(),
+                value: currentVal,
+                onChanged: (val) => setState(() => _selectedNamingSeries = val ?? ''),
+              );
+            },
+          ),
+
+          const SizedBox(height: 16),
+
+          // ─── Proveedor ───
+          _buildSectionLabel('PROVEEDOR'),
+          const SizedBox(height: 6),
+          Container(
+            decoration: BoxDecoration(
+              color: AppDesign.cardWhite,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: AppDesign.navy.withValues(alpha: 0.06),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                TextField(
+                  controller: _supplierController,
+                  decoration: InputDecoration(
+                    labelText: 'Proveedor *',
+                    hintText: 'Escribí el nombre del proveedor',
+                    prefixIcon: const Icon(Icons.business, color: AppDesign.navy),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: AppDesign.cardWhite,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                  onChanged: _searchSuppliers,
+                ),
+                if (_supplierSuggestions.isNotEmpty)
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 200),
+                    decoration: BoxDecoration(
+                      border: Border(top: BorderSide(color: Colors.grey[200]!)),
+                    ),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _supplierSuggestions.length,
+                      itemBuilder: (context, index) {
+                        final s = _supplierSuggestions[index];
+                        return ListTile(
+                          dense: true,
+                          leading: AppDesign.circleAvatar(
+                            icon: Icons.business,
+                            bgColor: AppDesign.blueLight,
+                            iconColor: AppDesign.blueIcon,
+                            size: 32,
+                          ),
+                          title: Text(
+                            s['supplier_name'] ?? s['name'] ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Text(
+                            s['name'] ?? '',
+                            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () {
+                            _supplierController.text = s['supplier_name'] ?? s['name'] ?? '';
+                            _selectedSupplierId = s['name'] ?? '';
+                            setState(() => _supplierSuggestions = []);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ─── Fecha ───
+          _buildSectionLabel('FECHA DE RECEPCIÓN'),
+          const SizedBox(height: 6),
+          Container(
+            decoration: BoxDecoration(
+              color: AppDesign.cardWhite,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: AppDesign.navy.withValues(alpha: 0.06),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: InkWell(
+              onTap: _selectDate,
+              borderRadius: BorderRadius.circular(12),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Fecha de Recepción *',
+                  prefixIcon: const Icon(Icons.calendar_today, color: AppDesign.navy),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: AppDesign.cardWhite,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+                child: Text(
+                  DateFormat('dd/MM/yyyy').format(_selectedDate),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ─── Almacén Destino ───
+          _buildSectionLabel('ALMACÉN DESTINO'),
+          const SizedBox(height: 6),
+          Consumer<MaterialReceiptProvider>(
+            builder: (context, mrProvider, _) {
+              final warehouses = mrProvider.warehouses;
+              final loaded = mrProvider.catalogsLoaded;
+              return _buildDropdownField(
+                label: 'Almacén Destino *',
+                icon: Icons.warehouse,
+                hint: !loaded ? 'Cargando...' : 'Seleccionar almacén',
+                items: warehouses.map<DropdownMenuItem<String>>((w) {
+                  final name = (w['name'] ?? '').toString();
+                  final displayName = (w['warehouse_name'] ?? name).toString();
+                  return DropdownMenuItem<String>(
+                    value: name,
+                    child: Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  );
+                }).toList(),
+                value: _selectedWarehouse.isNotEmpty ? _selectedWarehouse : null,
+                onChanged: (val) => setState(() => _selectedWarehouse = val ?? ''),
+              );
+            },
+          ),
+
+          const SizedBox(height: 16),
+
+          // ─── Centro de Costos ───
+          _buildSectionLabel('CENTRO DE COSTOS'),
+          const SizedBox(height: 6),
+          Consumer<MaterialReceiptProvider>(
+            builder: (context, mrProvider, _) {
+              final centers = mrProvider.costCenters;
+              final loaded = mrProvider.catalogsLoaded;
+              return _buildDropdownField(
+                label: 'Centro de Costos *',
+                icon: Icons.account_balance,
+                hint: !loaded ? 'Cargando...' : 'Seleccionar centro',
+                items: centers.map<DropdownMenuItem<String>>((c) {
+                  final name = (c['name'] ?? '').toString();
+                  final displayName = (c['cost_center_name'] ?? name).toString();
+                  return DropdownMenuItem<String>(
+                    value: name,
+                    child: Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  );
+                }).toList(),
+                value: _selectedCostCenter.isNotEmpty ? _selectedCostCenter : null,
+                onChanged: (val) => setState(() => _selectedCostCenter = val ?? ''),
+              );
+            },
+          ),
+
+          const SizedBox(height: 24),
+
+          // ─── Botón Crear ───
+          SizedBox(
+            height: 52,
+            child: ElevatedButton.icon(
+              onPressed: _startDirectCreation,
+              icon: const Icon(Icons.arrow_forward, size: 20),
+              label: const Text(
+                'Crear y Escanear',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppDesign.navy,
+                foregroundColor: Colors.white,
+                elevation: 4,
+                shadowColor: AppDesign.navy.withValues(alpha: 0.4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Helper — label de sección estilo dashboard.
+  Widget _buildSectionLabel(String text) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        color: Colors.grey[500],
+        letterSpacing: 0.8,
+      ),
+    );
+  }
+
+  /// Helper — dropdown field estilo AppDesign.
+  Widget _buildDropdownField({
+    required String label,
+    required IconData icon,
+    required String hint,
+    required List<DropdownMenuItem<String>> items,
+    required String? value,
+    ValueChanged<String?>? onChanged,
+    bool enabled = true,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppDesign.cardWhite,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: AppDesign.navy.withValues(alpha: 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: DropdownButtonFormField<String>(
+        isExpanded: true,
+        isDense: true,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon, color: AppDesign.navy),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          filled: true,
+          fillColor: enabled ? AppDesign.cardWhite : Colors.grey[100],
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        ),
+        initialValue: value,
+        hint: Text(
+          hint,
+          style: TextStyle(color: Colors.grey[400], fontSize: 13),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        icon: Icon(Icons.arrow_drop_down, size: 22, color: enabled ? AppDesign.navy : Colors.grey),
+        items: items,
+        onChanged: enabled ? onChanged : null,
       ),
     );
   }
@@ -673,6 +946,73 @@ class _MaterialReceiptDetailScreenState
           ),
 
         const SizedBox(height: 8),
+
+        // ─── SERIE DE NUMERACIÓN (solo si viene desde PO y no tiene serie) ───
+        if (!provider.isSaved && receipt.namingSeries.isEmpty && !provider.isSubmitted)
+          Consumer<MaterialReceiptProvider>(
+            builder: (context, mrProvider, _) {
+              final series = mrProvider.namingSeriesOptions;
+              final loaded = mrProvider.catalogsLoaded;
+              if (!loaded || series.isEmpty) return const SizedBox.shrink();
+              return Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppDesign.navy.withValues(alpha: 0.06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Serie de Numeración *',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey[500],
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      isDense: true,
+                      initialValue: _selectedNamingSeries.isNotEmpty ? _selectedNamingSeries : null,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      ),
+                      hint: const Text('Seleccionar serie', style: TextStyle(fontSize: 13)),
+                      items: series.map((s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+                      )).toList(),
+                      onChanged: (val) {
+                        setState(() => _selectedNamingSeries = val ?? '');
+                        // Actualizar en el modelo
+                        if (val != null && receipt.namingSeries.isEmpty) {
+                          receipt.namingSeries = val;
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
 
         // ─── INFO RECEPCIÓN ───
         Container(

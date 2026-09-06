@@ -696,7 +696,7 @@ class ErpNextService {
   // RECEPCIÓN DE MERCADERÍA (Stock Entry — Material Receipt)
   // ══════════════════════════════════════════════════════════════
 
-  /// Lista Stock Entries tipo "Material Receipt".
+  /// Lista Purchase Receipts (recepciones de mercadería desde PO).
   Future<List<Map<String, dynamic>>> listMaterialReceipts({
     int limit = 50,
   }) async {
@@ -704,10 +704,9 @@ class ErpNextService {
       final response = await _dio.get(
         '$baseUrl/api/method/frappe.client.get_list',
         queryParameters: {
-          'doctype': 'Stock Entry',
+          'doctype': 'Purchase Receipt',
           'fields':
-              '["name","posting_date","stock_entry_type","docstatus","total_amount","supplier"]',
-          'filters': '[["stock_entry_type","=","Material Receipt"]]',
+              '["name","supplier","posting_date","docstatus","grand_total"]',
           'order_by': 'creation desc',
           'limit_page_length': limit,
         },
@@ -745,6 +744,7 @@ class ErpNextService {
     required List<Map<String, dynamic>> items,
     String? namingSeries,
     String? supplier,
+    String? costCenter,
   }) async {
     final doc = {
       'doctype': 'Stock Entry',
@@ -753,6 +753,8 @@ class ErpNextService {
       if (namingSeries != null && namingSeries.isNotEmpty)
         'naming_series': namingSeries,
       if (supplier != null && supplier.isNotEmpty) 'supplier': supplier,
+      if (costCenter != null && costCenter.isNotEmpty)
+        'cost_center': costCenter,
       'items': items
           .map(
             (item) => {
@@ -940,6 +942,47 @@ class ErpNextService {
     }
   }
 
+  /// Crea un Purchase Receipt como borrador SIN PO vinculada (creación directa).
+  Future<Map<String, dynamic>> createDirectPurchaseReceipt({
+    required String supplier,
+    required String warehouse,
+    required List<Map<String, dynamic>> items,
+    String? namingSeries,
+    String? costCenter,
+  }) async {
+    final doc = {
+      'doctype': 'Purchase Receipt',
+      'supplier': supplier,
+      'set_warehouse': warehouse,
+      'posting_date': DateTime.now().toIso8601String().substring(0, 10),
+      if (namingSeries != null && namingSeries.isNotEmpty)
+        'naming_series': namingSeries,
+      if (costCenter != null && costCenter.isNotEmpty)
+        'cost_center': costCenter,
+      'items': items
+          .map(
+            (item) => {
+              'doctype': 'Purchase Receipt Item',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              'warehouse': warehouse,
+              if (item['uom'] != null) 'uom': item['uom'],
+            },
+          )
+          .toList(),
+    };
+
+    final response = await _dio.post(
+      '$baseUrl/api/resource/Purchase%20Receipt',
+      data: doc,
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error creando Purchase Receipt: ${response.data}');
+  }
+
   /// Crea un Purchase Receipt como borrador desde una PO.
   Future<Map<String, dynamic>> createPurchaseReceipt({
     required String purchaseOrder,
@@ -1070,7 +1113,9 @@ class ErpNextService {
           'doctype': 'Purchase Receipt',
           'fields':
               '["name","supplier","posting_date","docstatus","grand_total"]',
-          'filters': '["Purchase Receipt Item","purchase_order","=","$poName"]',
+          'filters': jsonEncode([[
+            'Purchase Receipt Item', 'purchase_order', '=', poName,
+          ]]),
           'group_by': 'name',
           'order_by': 'creation desc',
           'limit_page_length': 50,

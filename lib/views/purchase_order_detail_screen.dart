@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../providers/inventory_provider.dart';
 import '../providers/purchase_order_provider.dart';
+import '../providers/material_receipt_provider.dart';
 import '../services/erpnext_service.dart';
 import '../models/purchase_order.dart';
 import '../theme/app_design.dart';
@@ -451,7 +452,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       _prSavedName = result['name'] ?? _prSavedName;
       _prSaved = true;
 
+      // Notificar al provider de recepciones para que refresque su lista
       if (mounted) {
+        context.read<MaterialReceiptProvider>().fetchReceipts();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('💾 Borrador guardado: $_prSavedName'),
@@ -503,7 +506,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       final service = context.read<ErpNextService>();
       await service.submitPurchaseReceipt(_prSavedName);
 
+      // Notificar al provider de recepciones para que refresque su lista
       if (mounted) {
+        context.read<MaterialReceiptProvider>().fetchReceipts();
         await showDialog(
           context: context,
           builder: (ctx) => AlertDialog(

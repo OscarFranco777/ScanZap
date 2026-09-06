@@ -197,113 +197,11 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
         ],
       ),
       floatingActionButton: AppDesign.fab(
-        onPressed: () => _showCreateOptions(context),
+        onPressed: () => _showPOSelection(context),
         icon: Icons.add,
         label: 'Nueva Recepción',
         color: AppDesign.greenIcon,
       ),
-    );
-  }
-
-  void _showCreateOptions(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Handle bar
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(top: 12),
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Crear Recepción',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.grey[800],
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // Opción: Desde PO
-              _buildOptionTile(
-                icon: Icons.shopping_cart_outlined,
-                iconBg: AppDesign.blueLight,
-                iconColor: AppDesign.blueIcon,
-                title: 'Desde Orden de Compra',
-                subtitle: 'Seleccionar PO enviada',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showPOSelection(context);
-                },
-              ),
-
-              // Opción: Directa
-              _buildOptionTile(
-                icon: Icons.add_box_outlined,
-                iconBg: AppDesign.greenLight,
-                iconColor: AppDesign.greenIcon,
-                title: 'Recepción Directa',
-                subtitle: 'Crear desde cero',
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  context.read<MaterialReceiptProvider>().clearCurrentReceipt();
-                  context.read<MaterialReceiptProvider>().createNewReceipt();
-                  final result = await Navigator.pushNamed(context, '/mr-create');
-                  if (result == true && context.mounted) {
-                    context.read<MaterialReceiptProvider>().fetchReceipts();
-                  }
-                },
-              ),
-
-              const SizedBox(height: 12),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOptionTile({
-    required IconData icon,
-    required Color iconBg,
-    required Color iconColor,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-      leading: AppDesign.circleAvatar(
-        icon: icon,
-        bgColor: iconBg,
-        iconColor: iconColor,
-        size: 44,
-      ),
-      title: Text(
-        title,
-        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(color: Colors.grey[500], fontSize: 12),
-      ),
-      trailing: Icon(Icons.chevron_right, color: Colors.grey[400]),
-      onTap: onTap,
     );
   }
 
@@ -368,9 +266,13 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
                             context: context,
                             onTap: () async {
                               Navigator.pop(ctx);
-                              await provider.createFromPO(name);
+                              await provider.createFromPO(
+                                name,
+                                supplier: supplier,
+                                supplierId: supplier,
+                              );
                               if (context.mounted) {
-                                final result = await Navigator.pushNamed(context, '/mr-create');
+                                final result = await Navigator.pushNamed(context, '/mr-create', arguments: {'fromPO': true});
                                 if (result == true && context.mounted) {
                                   provider.fetchReceipts();
                                 }
