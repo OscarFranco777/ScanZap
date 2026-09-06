@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../providers/inventory_provider.dart';
 import '../providers/material_receipt_provider.dart';
-import '../services/erpnext_service.dart';
 import '../theme/app_design.dart';
 
 /// Pantalla de lista de Recepciones de Mercadería — diseño dashboard moderno.
@@ -198,7 +197,9 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
         ],
       ),
       floatingActionButton: AppDesign.fab(
-        onPressed: () => _showPOSelection(context),
+        onPressed: () {
+          Navigator.pushNamed(context, '/mr-create');
+        },
         icon: Icons.add,
         label: 'Nueva Recepción',
         color: AppDesign.greenIcon,
@@ -206,223 +207,7 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
     );
   }
 
-  void _showPOSelection(BuildContext context) async {
-    final provider = context.read<MaterialReceiptProvider>();
-    await provider.fetchSubmittedPOs();
 
-    if (!context.mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        maxChildSize: 0.9,
-        minChildSize: 0.3,
-        expand: false,
-        builder: (ctx, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            children: [
-              // Handle bar
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(top: 12),
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Nueva Recepción de Mercadería',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.grey[800],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  children: [
-                    // ─── Opción: Recepción Directa ───
-                    AppDesign.buildListCard(
-                      context: context,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        Navigator.pushNamed(context, '/mr-create', arguments: {});
-                      },
-                      child: Row(
-                        children: [
-                          AppDesign.circleAvatar(
-                            icon: Icons.add_circle_outline,
-                            bgColor: AppDesign.tealLight,
-                            iconColor: AppDesign.tealIcon,
-                            size: 38,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Recepción Directa',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                Text(
-                                  'Crear recepción sin orden de compra',
-                                  style: TextStyle(
-                                    color: Colors.grey[500],
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Icon(
-                            Icons.arrow_forward_ios,
-                            size: 16,
-                            color: Colors.grey[400],
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // ─── Separador ───
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(child: Divider(color: Colors.grey[300])),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Text(
-                            'Órdenes de Compra',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.grey[400],
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                        Expanded(child: Divider(color: Colors.grey[300])),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // ─── POs ───
-                    if (provider.submittedPOs.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 20),
-                        child: AppDesign.emptyState(
-                          icon: Icons.shopping_cart_outlined,
-                          title: 'No hay órdenes enviadas',
-                        ),
-                      )
-                    else
-                      for (final po in provider.submittedPOs)
-                        _buildPOCard(context, provider, po, ctx),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPOCard(
-    BuildContext context,
-    MaterialReceiptProvider provider,
-    Map<String, dynamic> po,
-    BuildContext ctx,
-  ) {
-    final name = po['name'] ?? '';
-    final supplier = po['supplier'] ?? '';
-    final total = (po['grand_total'] ?? 0).toDouble();
-
-    return AppDesign.buildListCard(
-      context: context,
-      onTap: () async {
-        Navigator.pop(ctx);
-
-        // Obtener datos de la PO para pre-llenar el modal
-        try {
-          final service = context.read<ErpNextService>();
-          final poDetail = await service.getPODetailsForNewReceipt(name);
-          if (!context.mounted) return;
-
-          Navigator.pushNamed(context, '/mr-create', arguments: {
-            'poName': name,
-            'supplier': poDetail?['supplier'] ?? supplier,
-            'supplierId': poDetail?['supplier'] ?? supplier,
-            'warehouse': poDetail?['set_warehouse'] ?? '',
-            'costCenter': poDetail?['cost_center'] ?? '',
-          });
-        } catch (e) {
-          // Si falla, navegar sin datos pre-cargados
-          if (context.mounted) {
-            Navigator.pushNamed(context, '/mr-create', arguments: {
-              'poName': name,
-              'supplier': supplier,
-              'supplierId': supplier,
-            });
-          }
-        }
-      },
-      child: Row(
-        children: [
-          AppDesign.circleAvatar(
-            icon: Icons.shopping_cart_outlined,
-            bgColor: AppDesign.blueLight,
-            iconColor: AppDesign.blueIcon,
-            size: 38,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                ),
-                Text(
-                  supplier,
-                  style: TextStyle(
-                    color: Colors.grey[500],
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Text(
-            'L ${total.toStringAsFixed(2)}',
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 13,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildReceiptCard(BuildContext context, Map<String, dynamic> receipt) {
     final name = receipt['name'] ?? '';

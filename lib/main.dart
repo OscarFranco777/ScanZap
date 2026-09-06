@@ -40,7 +40,8 @@ class InventarioApp extends StatelessWidget {
           create: (_) => PurchaseOrderProvider(erpNextService: erpNextService),
         ),
         ChangeNotifierProvider(
-          create: (_) => MaterialReceiptProvider(erpNextService: erpNextService),
+          create: (_) =>
+              MaterialReceiptProvider(erpNextService: erpNextService),
         ),
       ],
       child: MaterialApp(
@@ -51,10 +52,7 @@ class InventarioApp extends StatelessWidget {
           colorSchemeSeed: const Color(0xFF1976D2),
           useMaterial3: true,
           fontFamily: 'Roboto',
-          appBarTheme: const AppBarTheme(
-            centerTitle: true,
-            elevation: 0,
-          ),
+          appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
           textSelectionTheme: const TextSelectionThemeData(
             selectionColor: Colors.transparent,
             selectionHandleColor: Color(0xFF1976D2),
