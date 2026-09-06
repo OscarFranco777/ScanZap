@@ -84,7 +84,6 @@ class HomeScreen extends StatelessWidget {
                             bgColor: const Color(0xFFFFF3E0),
                             iconBgColor: const Color(0xFFFFE0B2),
                             iconColor: const Color(0xFFE65100),
-                            enabled: provider.isConnected,
                             onTap: () => Navigator.pushNamed(context, '/po-list'),
                           ),
                         ),
@@ -96,7 +95,6 @@ class HomeScreen extends StatelessWidget {
                             bgColor: const Color(0xFFE8F5E9),
                             iconBgColor: const Color(0xFFC8E6C9),
                             iconColor: const Color(0xFF2E7D32),
-                            enabled: provider.isConnected,
                             onTap: () => Navigator.pushNamed(context, '/mr-list'),
                           ),
                         ),
@@ -105,7 +103,7 @@ class HomeScreen extends StatelessWidget {
 
                     const SizedBox(height: 14),
 
-                    // Row 2: Reportes + Gestión de Inventario (Soon)
+                    // Row 2: Reportes + Gestión de Inventario
                     Row(
                       children: [
                         Expanded(
@@ -115,9 +113,7 @@ class HomeScreen extends StatelessWidget {
                             bgColor: const Color(0xFFF3E5F5),
                             iconBgColor: const Color(0xFFE1BEE7),
                             iconColor: const Color(0xFF7B1FA2),
-                            badge: 'Soon',
-                            enabled: false,
-                            onTap: () {},
+                            onTap: () => Navigator.pushNamed(context, '/report'),
                           ),
                         ),
                         const SizedBox(width: 14),
@@ -128,9 +124,7 @@ class HomeScreen extends StatelessWidget {
                             bgColor: const Color(0xFFE0F7FA),
                             iconBgColor: const Color(0xFFB2EBF2),
                             iconColor: const Color(0xFF00838F),
-                            badge: 'Soon',
-                            enabled: false,
-                            onTap: () {},
+                            onTap: () => Navigator.pushNamed(context, '/scanner'),
                           ),
                         ),
                       ],
@@ -144,10 +138,12 @@ class HomeScreen extends StatelessWidget {
               // ─── Config bar ───
               _buildConfigBar(context, isSmall),
 
+              const SizedBox(height: 12),
+
               // ─── Footer stats ───
               _buildFooterStats(provider),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -321,43 +317,46 @@ class HomeScreen extends StatelessWidget {
   Widget _buildConfigBar(BuildContext context, bool isSmall) {
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: isSmall ? 20 : 32),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE8EDF3),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.settings_outlined, size: 20, color: Colors.grey[600]),
-            const SizedBox(width: 10),
-            Text(
-              'Configuración',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[700],
+      child: GestureDetector(
+        onTap: () => Navigator.pushNamed(context, '/config'),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE8EDF3),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.settings_outlined, size: 20, color: Colors.grey[600]),
+              const SizedBox(width: 10),
+              Text(
+                'Configuración',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700],
+                ),
               ),
-            ),
-            const Spacer(),
-            Text(
-              'Perfil de Usuario',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[500],
+              const Spacer(),
+              Text(
+                'Perfil de Usuario',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[500],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: _navy.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
+              const SizedBox(width: 8),
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: _navy.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.person_outline, size: 18, color: Colors.grey[600]),
               ),
-              child: Icon(Icons.person_outline, size: 18, color: Colors.grey[600]),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

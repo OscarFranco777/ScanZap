@@ -333,15 +333,19 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
       if (poDetail != null && poDetail['items'] != null) {
         final items = List<Map<String, dynamic>>.from(poDetail['items']);
-        _prItems = items.map((item) => {
-          'item_code': item['item_code'] ?? '',
-          'item_name': item['item_name'] ?? '',
-          'qty': item['qty'] ?? 0,
-          'received_qty': item['received_qty'] ?? 0,
-          'uom': item['uom'] ?? 'Unidad',
-          'rate': item['rate'] ?? 0,
-          'purchase_order_item': item['name'] ?? '',
-        }).toList();
+        _prItems = items
+            .map(
+              (item) => {
+                'item_code': item['item_code'] ?? '',
+                'item_name': item['item_name'] ?? '',
+                'qty': item['qty'] ?? 0,
+                'received_qty': item['received_qty'] ?? 0,
+                'uom': item['uom'] ?? 'Unidad',
+                'rate': item['rate'] ?? 0,
+                'purchase_order_item': item['name'] ?? '',
+              },
+            )
+            .toList();
       }
 
       _prNamingSeriesOptions = series;
@@ -442,8 +446,12 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
         // Crear nuevo borrador
         result = await service.createPurchaseReceipt(
           purchaseOrder: order!.id!,
-          supplier: order.supplierId.isNotEmpty ? order.supplierId : order.supplier,
-          warehouse: _prWarehouse.isNotEmpty ? _prWarehouse : order.setWarehouse,
+          supplier: order.supplierId.isNotEmpty
+              ? order.supplierId
+              : order.supplier,
+          warehouse: _prWarehouse.isNotEmpty
+              ? _prWarehouse
+              : order.setWarehouse,
           items: _prItems,
           namingSeries: _prNamingSeries,
           costCenter: order.costCenter,
@@ -480,7 +488,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Enviar Recepción'),
-        content: Text('¿Confirmás enviar $_prSavedName? No podrá modificarse después.'),
+        content: Text(
+          '¿Confirmás enviar $_prSavedName? No podrá modificarse después.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -515,7 +525,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  '$_prSavedName',
+                  _prSavedName,
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
@@ -749,7 +759,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     vertical: 10,
                   ),
                 ),
-                value: (series.contains(_selectedNamingSeries))
+                initialValue: (series.contains(_selectedNamingSeries))
                     ? _selectedNamingSeries
                     : series.first,
                 icon: const Icon(Icons.arrow_drop_down, size: 20),
@@ -868,7 +878,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     vertical: 10,
                   ),
                 ),
-                value: _selectedWarehouse.isNotEmpty
+                initialValue: _selectedWarehouse.isNotEmpty
                     ? _selectedWarehouse
                     : null,
                 hint: Text(
@@ -917,7 +927,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     vertical: 10,
                   ),
                 ),
-                value: _selectedCostCenter.isNotEmpty
+                initialValue: _selectedCostCenter.isNotEmpty
                     ? _selectedCostCenter
                     : null,
                 hint: Text(
@@ -1333,7 +1343,8 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     const Spacer(),
                     if (_linkedPRsLoading)
                       const SizedBox(
-                        width: 16, height: 16,
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       ),
                   ],
@@ -1352,13 +1363,13 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     final statusColor = isSubmitted
                         ? Colors.green
                         : isDraft
-                            ? Colors.orange
-                            : Colors.grey;
+                        ? Colors.orange
+                        : Colors.grey;
                     final statusText = isSubmitted
                         ? 'Enviado'
                         : isDraft
-                            ? 'Borrador'
-                            : 'Cancelado';
+                        ? 'Borrador'
+                        : 'Cancelado';
                     return Card(
                       margin: const EdgeInsets.only(bottom: 4),
                       child: ListTile(
@@ -1370,14 +1381,20 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         ),
                         title: Text(
                           pr['name'] ?? '',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         subtitle: Text(
                           '${pr['posting_date'] ?? ''} — Bs. ${pr['grand_total'] ?? 0}',
                           style: const TextStyle(fontSize: 11),
                         ),
                         trailing: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: statusColor[50],
                             borderRadius: BorderRadius.circular(10),
@@ -1467,7 +1484,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _prSaved ? 'Borrador Guardado' : 'Nueva Recepción de Mercadería',
+                      _prSaved
+                          ? 'Borrador Guardado'
+                          : 'Nueva Recepción de Mercadería',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
@@ -1477,10 +1496,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     if (_prSaved && _prSavedName.isNotEmpty)
                       Text(
                         _prSavedName,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey[700],
-                        ),
+                        style: TextStyle(fontSize: 11, color: Colors.grey[700]),
                       ),
                   ],
                 ),
@@ -1523,7 +1539,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         color: Colors.black54,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.close, size: 16, color: Colors.white),
+                      child: const Icon(
+                        Icons.close,
+                        size: 16,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),
@@ -1531,14 +1551,21 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   top: 4,
                   left: 4,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.teal.withOpacity(0.9),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       _prScanLocked ? '⏳ Esperá...' : '📷 Escaneá producto',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
                     ),
                   ),
                 ),
@@ -1570,10 +1597,14 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     }
                   });
                 },
-                icon: Icon(_prScannerActive ? Icons.camera_alt : Icons.qr_code_scanner),
+                icon: Icon(
+                  _prScannerActive ? Icons.camera_alt : Icons.qr_code_scanner,
+                ),
                 tooltip: _prScannerActive ? 'Cerrar escáner' : 'Abrir escáner',
                 style: IconButton.styleFrom(
-                  backgroundColor: _prScannerActive ? Colors.orange : Colors.teal,
+                  backgroundColor: _prScannerActive
+                      ? Colors.orange
+                      : Colors.teal,
                   foregroundColor: Colors.white,
                 ),
               ),
@@ -1585,14 +1616,20 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   controller: _prQtyController,
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
                   decoration: const InputDecoration(
                     labelText: 'Cant.',
                     border: OutlineInputBorder(),
                     filled: true,
                     fillColor: Colors.white,
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 8,
+                    ),
                   ),
                 ),
               ),
@@ -1609,7 +1646,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     filled: true,
                     fillColor: Colors.white,
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 8,
+                    ),
                   ),
                   onSubmitted: (v) {
                     if (v.trim().isNotEmpty) _processPRScan(v);
@@ -1635,7 +1675,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               const Spacer(),
               Text(
                 '${_prItems.length} items',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal[700]),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.teal[700],
+                ),
               ),
             ],
           ),
@@ -1650,9 +1694,16 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.inbox_outlined, size: 48, color: Colors.grey[300]),
+                      Icon(
+                        Icons.inbox_outlined,
+                        size: 48,
+                        color: Colors.grey[300],
+                      ),
                       const SizedBox(height: 8),
-                      Text('No hay items', style: TextStyle(color: Colors.grey[500])),
+                      Text(
+                        'No hay items',
+                        style: TextStyle(color: Colors.grey[500]),
+                      ),
                     ],
                   ),
                 )
@@ -1661,9 +1712,13 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   itemCount: _prItems.length,
                   itemBuilder: (context, index) {
                     final item = _prItems[index];
-                    final pending = (item['qty'] ?? 0) - (item['received_qty'] ?? 0);
+                    final pending =
+                        (item['qty'] ?? 0) - (item['received_qty'] ?? 0);
                     return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
                       child: Padding(
                         padding: const EdgeInsets.all(8),
                         child: Row(
@@ -1673,15 +1728,24 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    (item['item_name'] ?? item['item_code'] ?? '').toString(),
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                    (item['item_name'] ??
+                                            item['item_code'] ??
+                                            '')
+                                        .toString(),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
                                     '${item["item_code"]} — Pedido: ${item["qty"]} — Pendiente: $pending',
-                                    style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 11,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -1691,34 +1755,55 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                               children: [
                                 IconButton(
                                   onPressed: () {
-                                    final newQty = (_prItems[index]['qty'] ?? 0) - 1;
+                                    final newQty =
+                                        (_prItems[index]['qty'] ?? 0) - 1;
                                     if (newQty <= 0) {
                                       setState(() => _prItems.removeAt(index));
                                     } else {
-                                      setState(() => _prItems[index]['qty'] = newQty);
+                                      setState(
+                                        () => _prItems[index]['qty'] = newQty,
+                                      );
                                     }
                                   },
-                                  icon: const Icon(Icons.remove_circle_outline, size: 20),
+                                  icon: const Icon(
+                                    Icons.remove_circle_outline,
+                                    size: 20,
+                                  ),
                                   color: Colors.red,
                                   padding: const EdgeInsets.all(2),
-                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                  constraints: const BoxConstraints(
+                                    minWidth: 28,
+                                    minHeight: 28,
+                                  ),
                                 ),
                                 Container(
                                   width: 36,
                                   alignment: Alignment.center,
                                   child: Text(
                                     '${_prItems[index]["qty"]}',
-                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                                 IconButton(
                                   onPressed: () {
-                                    setState(() => _prItems[index]['qty'] = (_prItems[index]['qty'] ?? 0) + 1);
+                                    setState(
+                                      () => _prItems[index]['qty'] =
+                                          (_prItems[index]['qty'] ?? 0) + 1,
+                                    );
                                   },
-                                  icon: const Icon(Icons.add_circle_outline, size: 20),
+                                  icon: const Icon(
+                                    Icons.add_circle_outline,
+                                    size: 20,
+                                  ),
                                   color: Colors.green,
                                   padding: const EdgeInsets.all(2),
-                                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                  constraints: const BoxConstraints(
+                                    minWidth: 28,
+                                    minHeight: 28,
+                                  ),
                                 ),
                               ],
                             ),
@@ -1753,14 +1838,23 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   child: SizedBox(
                     height: 48,
                     child: ElevatedButton.icon(
-                      onPressed: _prLoading || _prItems.isEmpty ? null : _savePR,
+                      onPressed: _prLoading || _prItems.isEmpty
+                          ? null
+                          : _savePR,
                       icon: _prLoading
                           ? const SizedBox(
-                              width: 16, height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : const Icon(Icons.save),
-                      label: Text(_prSaved ? 'Actualizar' : 'Guardar', style: const TextStyle(fontSize: 14)),
+                      label: Text(
+                        _prSaved ? 'Actualizar' : 'Guardar',
+                        style: const TextStyle(fontSize: 14),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue,
                         foregroundColor: Colors.white,
@@ -1775,7 +1869,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     child: ElevatedButton.icon(
                       onPressed: _prLoading || !_prSaved ? null : _submitPR,
                       icon: const Icon(Icons.send),
-                      label: const Text('Enviar', style: TextStyle(fontSize: 14)),
+                      label: const Text(
+                        'Enviar',
+                        style: TextStyle(fontSize: 14),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _prSaved ? Colors.green : Colors.grey,
                         foregroundColor: Colors.white,

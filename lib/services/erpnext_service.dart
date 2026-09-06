@@ -20,11 +20,13 @@ class ErpNextService {
 
   ErpNextService() {
     _cookieJar = CookieJar();
-    _dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 120),
-      validateStatus: (status) => status != null && status < 500,
-    ));
+    _dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 120),
+        validateStatus: (status) => status != null && status < 500,
+      ),
+    );
     _dio.interceptors.add(CookieManager(_cookieJar));
   }
 
@@ -52,10 +54,7 @@ class ErpNextService {
 
       final response = await _dio.post(
         '$baseUrl/api/method/login',
-        data: {
-          'usr': _username,
-          'pwd': _password,
-        },
+        data: {'usr': _username, 'pwd': _password},
         options: Options(
           contentType: 'application/x-www-form-urlencoded',
           headers: {'Accept': 'application/json'},
@@ -124,7 +123,8 @@ class ErpNextService {
   }
 
   /// Obtiene TODOS los productos con stock, incluyendo barcodes secundarios.
-  Future<({List<ItemModel> items, Map<String, String> barcodeMap})> fetchAllItemsAndBarcodes({
+  Future<({List<ItemModel> items, Map<String, String> barcodeMap})>
+  fetchAllItemsAndBarcodes({
     void Function(int loaded, int? total)? onProgress,
   }) async {
     onProgress?.call(0, null);
@@ -134,7 +134,8 @@ class ErpNextService {
         '$baseUrl/api/method/frappe.client.get_list',
         queryParameters: {
           'doctype': 'Item',
-          'fields': '["name","item_code","item_name","stock_uom","barcodes.barcode"]',
+          'fields':
+              '["name","item_code","item_name","stock_uom","barcodes.barcode"]',
           'filters': '[["is_stock_item","=",1]]',
           'limit_page_length': 50000,
         },
@@ -194,9 +195,7 @@ class ErpNextService {
       print('[Service] Lookup barcode: "$code"');
       final response = await _dio.get(
         '$baseUrl/api/method/frappe.utils.global_search.search',
-        queryParameters: {
-          'text': code.trim(),
-        },
+        queryParameters: {'text': code.trim()},
       );
 
       if (response.statusCode != 200) {
@@ -259,10 +258,7 @@ class ErpNextService {
       'item_group': 'All Item Groups',
     };
 
-    final response = await _dio.post(
-      '$baseUrl/api/resource/Item',
-      data: doc,
-    );
+    final response = await _dio.post('$baseUrl/api/resource/Item', data: doc);
 
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
@@ -298,13 +294,15 @@ class ErpNextService {
       'purpose': 'Physical Stock',
       'set_warehouse': warehouse,
       'items': items
-          .map((item) => {
-                'doctype': 'Stock Reconciliation Item',
-                'item_code': item['item_code'],
-                'warehouse': warehouse,
-                'qty_after_transaction': item['quantity'],
-                'valuation_rate': item['unit_cost'],
-              })
+          .map(
+            (item) => {
+              'doctype': 'Stock Reconciliation Item',
+              'item_code': item['item_code'],
+              'warehouse': warehouse,
+              'qty_after_transaction': item['quantity'],
+              'valuation_rate': item['unit_cost'],
+            },
+          )
           .toList(),
     };
 
@@ -351,7 +349,9 @@ class ErpNextService {
         final docs = r.data?['docs'];
         if (docs is List) {
           for (final doc in docs) {
-            if (doc is Map && doc['doctype'] == 'DocType' && doc['name'] == doctype) {
+            if (doc is Map &&
+                doc['doctype'] == 'DocType' &&
+                doc['name'] == doctype) {
               // Buscar campo naming_series
               final fields = doc['fields'];
               if (fields is List) {
@@ -370,7 +370,9 @@ class ErpNextService {
         }
       } else {
         final body = r.data?.toString() ?? '';
-        print('[NS] M1 body: ${body.substring(0, body.length > 300 ? 300 : body.length)}');
+        print(
+          '[NS] M1 body: ${body.substring(0, body.length > 300 ? 300 : body.length)}',
+        );
       }
     } catch (e) {
       print('[NS] M1 error: $e');
@@ -385,7 +387,13 @@ class ErpNextService {
         queryParameters: {
           'doctype': doctype,
           'fields': '["naming_series"]',
-          'filters': jsonEncode([['docstatus', 'in', [0, 1]]]),
+          'filters': jsonEncode([
+            [
+              'docstatus',
+              'in',
+              [0, 1],
+            ],
+          ]),
           'limit_page_length': 500,
           'order_by': 'creation desc',
         },
@@ -434,7 +442,6 @@ class ErpNextService {
     print('[NS] TOTAL: ${result.length} series -> $result');
     return result;
   }
-
 
   // ALMACENES
   // ══════════════════════════════════════════════════════════════
@@ -542,13 +549,15 @@ class ErpNextService {
       if (costCenter.isNotEmpty) 'cost_center': costCenter,
       if (setWarehouse.isNotEmpty) 'set_warehouse': setWarehouse,
       'items': items
-          .map((item) => {
-                'doctype': 'Purchase Order Item',
-                'item_code': item['item_code'],
-                'qty': item['qty'],
-                'rate': item['rate'] ?? 0,
-                'schedule_date': scheduleDate,
-              })
+          .map(
+            (item) => {
+              'doctype': 'Purchase Order Item',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              'rate': item['rate'] ?? 0,
+              'schedule_date': scheduleDate,
+            },
+          )
           .toList(),
     };
 
@@ -570,12 +579,14 @@ class ErpNextService {
   }) async {
     final doc = {
       'items': items
-          .map((item) => {
-                'doctype': 'Purchase Order Item',
-                'item_code': item['item_code'],
-                'qty': item['qty'],
-                'rate': item['rate'] ?? 0,
-              })
+          .map(
+            (item) => {
+              'doctype': 'Purchase Order Item',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              'rate': item['rate'] ?? 0,
+            },
+          )
           .toList(),
     };
 
@@ -605,11 +616,7 @@ class ErpNextService {
       // Paso 2: Enviar el documento completo a frappe.client.submit
       final response = await _dio.post(
         '$baseUrl/api/method/frappe.client.submit',
-        data: {
-          'doctype': 'Purchase Order',
-          'docname': name,
-          'doc': doc,
-        },
+        data: {'doctype': 'Purchase Order', 'docname': name, 'doc': doc},
       );
       if (response.statusCode == 200) {
         return response.data['data'] ?? {};
@@ -619,7 +626,8 @@ class ErpNextService {
       String detail = '';
       if (e.response?.data != null) {
         if (e.response!.data is Map) {
-          detail = e.response!.data['exc'] ??
+          detail =
+              e.response!.data['exc'] ??
               e.response!.data['_server_messages'] ??
               e.response!.data['message'] ??
               e.response!.data.toString();
@@ -665,7 +673,8 @@ class ErpNextService {
         '$baseUrl/api/method/frappe.client.get_list',
         queryParameters: {
           'doctype': 'Purchase Order',
-          'fields': '["name","supplier","transaction_date","docstatus","grand_total"]',
+          'fields':
+              '["name","supplier","transaction_date","docstatus","grand_total"]',
           'filters': jsonEncode(filters),
           'order_by': 'creation desc',
           'limit_page_length': limit,
@@ -696,7 +705,8 @@ class ErpNextService {
         '$baseUrl/api/method/frappe.client.get_list',
         queryParameters: {
           'doctype': 'Stock Entry',
-          'fields': '["name","posting_date","stock_entry_type","docstatus","total_amount","supplier"]',
+          'fields':
+              '["name","posting_date","stock_entry_type","docstatus","total_amount","supplier"]',
           'filters': '[["stock_entry_type","=","Material Receipt"]]',
           'order_by': 'creation desc',
           'limit_page_length': limit,
@@ -740,16 +750,19 @@ class ErpNextService {
       'doctype': 'Stock Entry',
       'stock_entry_type': 'Material Receipt',
       'posting_date': DateTime.now().toIso8601String().substring(0, 10),
-      if (namingSeries != null && namingSeries.isNotEmpty) 'naming_series': namingSeries,
+      if (namingSeries != null && namingSeries.isNotEmpty)
+        'naming_series': namingSeries,
       if (supplier != null && supplier.isNotEmpty) 'supplier': supplier,
       'items': items
-          .map((item) => {
-                'doctype': 'Stock Entry Detail',
-                'item_code': item['item_code'],
-                'qty': item['qty'],
-                't_warehouse': warehouse,
-                if (item['uom'] != null) 'uom': item['uom'],
-              })
+          .map(
+            (item) => {
+              'doctype': 'Stock Entry Detail',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              't_warehouse': warehouse,
+              if (item['uom'] != null) 'uom': item['uom'],
+            },
+          )
           .toList(),
     };
 
@@ -771,13 +784,15 @@ class ErpNextService {
   }) async {
     final doc = {
       'items': items
-          .map((item) => {
-                'doctype': 'Stock Entry Detail',
-                'item_code': item['item_code'],
-                'qty': item['qty'],
-                't_warehouse': item['t_warehouse'],
-                if (item['uom'] != null) 'uom': item['uom'],
-              })
+          .map(
+            (item) => {
+              'doctype': 'Stock Entry Detail',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              't_warehouse': item['t_warehouse'],
+              if (item['uom'] != null) 'uom': item['uom'],
+            },
+          )
           .toList(),
     };
 
@@ -807,11 +822,7 @@ class ErpNextService {
       // Paso 2: Enviar
       final response = await _dio.post(
         '$baseUrl/api/method/frappe.client.submit',
-        data: {
-          'doctype': 'Stock Entry',
-          'docname': name,
-          'doc': doc,
-        },
+        data: {'doctype': 'Stock Entry', 'docname': name, 'doc': doc},
       );
       if (response.statusCode == 200) {
         return response.data['data'] ?? {};
@@ -821,7 +832,8 @@ class ErpNextService {
       String detail = '';
       if (e.response?.data != null) {
         if (e.response!.data is Map) {
-          detail = e.response!.data['exc'] ??
+          detail =
+              e.response!.data['exc'] ??
               e.response!.data['_server_messages'] ??
               e.response!.data['message'] ??
               e.response!.data.toString();
@@ -863,13 +875,13 @@ class ErpNextService {
   }
 
   /// Obtiene los items de una Purchase Order enviada.
-  Future<List<Map<String, dynamic>>> getPurchaseOrderItems(String poName) async {
+  Future<List<Map<String, dynamic>>> getPurchaseOrderItems(
+    String poName,
+  ) async {
     try {
       final response = await _dio.get(
         '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(poName)}',
-        queryParameters: {
-          'fields': '["items"]',
-        },
+        queryParameters: {'fields': '["items"]'},
       );
       if (response.statusCode == 200) {
         final items = response.data?['data']?['items'] ?? [];
@@ -947,16 +959,18 @@ class ErpNextService {
       if (costCenter != null && costCenter.isNotEmpty)
         'cost_center': costCenter,
       'items': items
-          .map((item) => {
-                'doctype': 'Purchase Receipt Item',
-                'item_code': item['item_code'],
-                'qty': item['qty'],
-                'warehouse': warehouse,
-                'purchase_order': purchaseOrder,
-                'purchase_order_item': item['purchase_order_item'],
-                if (item['uom'] != null) 'uom': item['uom'],
-                if (item['rate'] != null) 'rate': item['rate'],
-              })
+          .map(
+            (item) => {
+              'doctype': 'Purchase Receipt Item',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              'warehouse': warehouse,
+              'purchase_order': purchaseOrder,
+              'purchase_order_item': item['purchase_order_item'],
+              if (item['uom'] != null) 'uom': item['uom'],
+              if (item['rate'] != null) 'rate': item['rate'],
+            },
+          )
           .toList(),
     };
 
@@ -978,18 +992,20 @@ class ErpNextService {
   }) async {
     final doc = {
       'items': items
-          .map((item) => {
-                'doctype': 'Purchase Receipt Item',
-                'item_code': item['item_code'],
-                'qty': item['qty'],
-                'warehouse': item['warehouse'],
-                if (item['purchase_order'] != null)
-                  'purchase_order': item['purchase_order'],
-                if (item['purchase_order_item'] != null)
-                  'purchase_order_item': item['purchase_order_item'],
-                if (item['uom'] != null) 'uom': item['uom'],
-                if (item['rate'] != null) 'rate': item['rate'],
-              })
+          .map(
+            (item) => {
+              'doctype': 'Purchase Receipt Item',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              'warehouse': item['warehouse'],
+              if (item['purchase_order'] != null)
+                'purchase_order': item['purchase_order'],
+              if (item['purchase_order_item'] != null)
+                'purchase_order_item': item['purchase_order_item'],
+              if (item['uom'] != null) 'uom': item['uom'],
+              if (item['rate'] != null) 'rate': item['rate'],
+            },
+          )
           .toList(),
     };
 
@@ -1017,11 +1033,7 @@ class ErpNextService {
 
       final response = await _dio.post(
         '$baseUrl/api/method/frappe.client.submit',
-        data: {
-          'doctype': 'Purchase Receipt',
-          'docname': name,
-          'doc': doc,
-        },
+        data: {'doctype': 'Purchase Receipt', 'docname': name, 'doc': doc},
       );
       if (response.statusCode == 200) {
         return response.data['data'] ?? {};
@@ -1031,7 +1043,8 @@ class ErpNextService {
       String detail = '';
       if (e.response?.data != null) {
         if (e.response!.data is Map) {
-          detail = e.response!.data['exc'] ??
+          detail =
+              e.response!.data['exc'] ??
               e.response!.data['_server_messages'] ??
               e.response!.data['message'] ??
               e.response!.data.toString();
@@ -1047,14 +1060,17 @@ class ErpNextService {
   }
 
   /// Lista Purchase Receipts vinculados a una Purchase Order específica.
-  Future<List<Map<String, dynamic>>> listPurchaseReceiptsForPO(String poName) async {
+  Future<List<Map<String, dynamic>>> listPurchaseReceiptsForPO(
+    String poName,
+  ) async {
     try {
       final response = await _dio.get(
         '$baseUrl/api/method/frappe.client.get_list',
         queryParameters: {
           'doctype': 'Purchase Receipt',
-          'fields': '["name","supplier","posting_date","docstatus","grand_total"]',
-          'filters': '["Purchase Receipt Item","purchase_order","=","${poName}"]',
+          'fields':
+              '["name","supplier","posting_date","docstatus","grand_total"]',
+          'filters': '["Purchase Receipt Item","purchase_order","=","$poName"]',
           'group_by': 'name',
           'order_by': 'creation desc',
           'limit_page_length': 50,
@@ -1080,7 +1096,8 @@ class ErpNextService {
         '$baseUrl/api/method/frappe.client.get_list',
         queryParameters: {
           'doctype': 'Purchase Receipt',
-          'fields': '["name","supplier","posting_date","docstatus","grand_total"]',
+          'fields':
+              '["name","supplier","posting_date","docstatus","grand_total"]',
           'order_by': 'creation desc',
           'limit_page_length': limit,
         },

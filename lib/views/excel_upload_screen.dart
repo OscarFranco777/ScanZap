@@ -322,23 +322,33 @@ class _ExcelUploadScreenState extends State<ExcelUploadScreen> {
             ),
           ),
 
-          // Botón continuar — SIEMPRE visible al fondo
-          if (provider.isReady)
+          // Botón cargar — visible cuando hay Excel cargado
+          if (provider.excelLoaded)
             SafeArea(
               top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
                 child: SizedBox(
-                  height: 50,
+                  height: 56,
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     onPressed: () =>
                         Navigator.of(context).pushReplacementNamed('/home'),
-                    icon: const Icon(Icons.arrow_forward),
-                    label: const Text('Continuar al Inventario'),
+                    icon: const Icon(Icons.check_circle_outline, size: 22),
+                    label: const Text(
+                      'Cargar Costos al Inventario',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).primaryColor,
+                      backgroundColor: const Color(0xFF1565C0),
                       foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 4,
                     ),
                   ),
                 ),
