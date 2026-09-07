@@ -198,6 +198,7 @@ class _MaterialReceiptListScreenState extends State<MaterialReceiptListScreen> {
       ),
       floatingActionButton: AppDesign.fab(
         onPressed: () {
+          context.read<MaterialReceiptProvider>().clearCurrentReceipt();
           Navigator.pushNamed(context, '/mr-create');
         },
         icon: Icons.add,

@@ -328,7 +328,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
     try {
       final service = context.read<ErpNextService>();
-      final series = await service.fetchPurchaseReceiptNamingSeries();
+      final series = await service.fetchNamingSeries('Purchase Receipt');
       _prNamingSeriesOptions = series;
       if (series.isNotEmpty) _prNamingSeries = series.first;
     } catch (e) {
