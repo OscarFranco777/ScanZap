@@ -84,11 +84,12 @@ class MaterialReceiptProvider with ChangeNotifier {
       warehouses = List<Map<String, dynamic>>.from(results[0] as List);
       namingSeriesOptions = List<String>.from(results[1] as List);
       costCenters = List<Map<String, dynamic>>.from(results[2] as List);
-      catalogsLoaded = true;
     } catch (e) {
       print('[MR] Error cargando catálogos: $e');
+    } finally {
+      catalogsLoaded = true;
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   /// Busca proveedores por nombre.
@@ -422,6 +423,11 @@ class MaterialReceiptProvider with ChangeNotifier {
     isSubmitted = false;
     lastScannedCode = '';
     lastScanMessage = '';
+    // Resetear catálogos para forzar recarga en la pantalla de creación
+    catalogsLoaded = false;
+    namingSeriesOptions = [];
+    warehouses = [];
+    costCenters = [];
     notifyListeners();
   }
 }
