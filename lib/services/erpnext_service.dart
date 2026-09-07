@@ -817,9 +817,19 @@ class ErpNextService {
         final docs = response.data?['docs'];
         if (docs is List && docs.isNotEmpty) {
           for (final doc in docs) {
-            if (doc is Map && doc['name'] == 'Purchase Receipt') {
-              if (doc['naming_series'] != null) {
-                return List<String>.from(doc['naming_series']);
+            if (doc is Map &&
+                doc['doctype'] == 'DocType' &&
+                doc['name'] == 'Purchase Receipt') {
+              // Buscar campo naming_series dentro del array fields
+              final fields = doc['fields'];
+              if (fields is List) {
+                for (final f in fields) {
+                  if (f is Map && f['fieldname'] == 'naming_series') {
+                    final raw = f['options']?.toString() ?? '';
+                    final opts = _parseNamingOptions(raw);
+                    if (opts.isNotEmpty) return opts;
+                  }
+                }
               }
             }
           }
