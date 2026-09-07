@@ -38,6 +38,12 @@ class _MaterialReceiptDetailScreenState
   final _qtyController = TextEditingController(text: '1');
   bool _showForm = true;
 
+  // ─── Estado de edición de precios (para colapsar cámara) ───
+  bool _priceEditing = false;
+
+  // ─── Cache de controllers para campos de precio ───
+  final Map<String, TextEditingController> _priceControllers = {};
+
   // ─── Campos ───
   String _selectedWarehouse = '';
   String _selectedCostCenter = '';
@@ -76,6 +82,31 @@ class _MaterialReceiptDetailScreenState
     });
   }
 
+  TextEditingController _getPriceController(String itemCode, String field, double value) {
+    final key = '${itemCode}_$field';
+    if (!_priceControllers.containsKey(key)) {
+      _priceControllers[key] = TextEditingController(
+        text: value > 0 ? value.toStringAsFixed(2) : '',
+      );
+    }
+    return _priceControllers[key]!;
+  }
+
+  void _cleanupPriceControllers(List<MaterialReceiptItem> items) {
+    final activeKeys = <String>{};
+    for (final item in items) {
+      activeKeys.add('${item.itemCode}_priceListRate');
+      activeKeys.add('${item.itemCode}_netAmount');
+    }
+    final toRemove = _priceControllers.keys
+        .where((k) => !activeKeys.contains(k))
+        .toList();
+    for (final k in toRemove) {
+      _priceControllers[k]!.dispose();
+      _priceControllers.remove(k);
+    }
+  }
+
   @override
   void dispose() {
     _cameraController?.dispose();
@@ -83,6 +114,10 @@ class _MaterialReceiptDetailScreenState
     _supplierController.dispose();
     _scanController.dispose();
     _qtyController.dispose();
+    for (final c in _priceControllers.values) {
+      c.dispose();
+    }
+    _priceControllers.clear();
     super.dispose();
   }
 
@@ -774,8 +809,8 @@ class _MaterialReceiptDetailScreenState
 
     return Column(
       children: [
-        // ─── CÁMARA (solo si no fue enviada) ───
-        if (_cameraActive && !provider.isSubmitted)
+        // ─── CÁMARA (solo si no fue enviada y no se está editando precio) ───
+        if (_cameraActive && !provider.isSubmitted && !_priceEditing)
           SizedBox(
             height: 180,
             child: Stack(
@@ -989,6 +1024,42 @@ class _MaterialReceiptDetailScreenState
           ),
 
         const SizedBox(height: 8),
+
+        // ─── CÁMARA COLAPSADA (indicador al editar precios) ───
+        if (_priceEditing && !_cameraActive)
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _priceEditing = false;
+                _cameraActive = true;
+                _cameraController?.start();
+              });
+            },
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppDesign.blueLight.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppDesign.blueIcon.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.camera_alt, size: 16, color: AppDesign.blueIcon),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Expandir cámara',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppDesign.blueIcon,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
         // ─── SERIE DE NUMERACIÓN (solo si viene desde PO y no tiene serie) ───
         if (!provider.isSaved && receipt.namingSeries.isEmpty && !provider.isSubmitted)
@@ -1234,6 +1305,15 @@ class _MaterialReceiptDetailScreenState
     final readOnly = provider.isSubmitted;
     final hasPO = item.purchaseOrderItem.isNotEmpty;
 
+    // Moneda de la company (fallback: $)
+    final inventoryProvider = context.read<InventoryProvider>();
+    final currency = inventoryProvider.companyCurrency.isNotEmpty
+        ? inventoryProvider.companyCurrency
+        : "\$";
+
+    // Limpiar controllers de items que ya no existen
+    _cleanupPriceControllers(provider.currentReceipt?.items ?? []);
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
       decoration: BoxDecoration(
@@ -1386,15 +1466,30 @@ class _MaterialReceiptDetailScreenState
                               ),
                               filled: true,
                               fillColor: Colors.white,
-                              prefixText: '\$ ',
+                              prefixText: '$currency ',
                               prefixStyle: TextStyle(fontSize: 12, color: Colors.grey[500]),
                             ),
-                            controller: TextEditingController(
-                              text: item.priceListRate > 0 ? item.priceListRate.toStringAsFixed(2) : '',
-                            ),
+                            controller: _getPriceController(item.itemCode, 'priceListRate', item.priceListRate),
                             onChanged: (val) {
                               final parsed = double.tryParse(val) ?? 0.0;
                               provider.updateItemPriceListRate(index, parsed);
+                            },
+                            onTapOutside: (_) {
+                              setState(() => _priceEditing = false);
+                              // Re-expandir cámara si no se está editando otro campo
+                              if (!_priceEditing && !_cameraActive && mounted) {
+                                _cameraActive = true;
+                                _cameraController?.start();
+                              }
+                            },
+                            onTap: () {
+                              if (!_priceEditing) {
+                                setState(() {
+                                  _priceEditing = true;
+                                  _cameraActive = false;
+                                  _cameraController?.stop();
+                                });
+                              }
                             },
                           ),
                         ],
@@ -1428,15 +1523,29 @@ class _MaterialReceiptDetailScreenState
                               ),
                               filled: true,
                               fillColor: Colors.white,
-                              prefixText: '\$ ',
+                              prefixText: '$currency ',
                               prefixStyle: TextStyle(fontSize: 12, color: Colors.grey[500]),
                             ),
-                            controller: TextEditingController(
-                              text: item.netAmount > 0 ? item.netAmount.toStringAsFixed(2) : '',
-                            ),
+                            controller: _getPriceController(item.itemCode, 'netAmount', item.netAmount),
                             onChanged: (val) {
                               final parsed = double.tryParse(val) ?? 0.0;
                               provider.updateItemNetAmount(index, parsed);
+                            },
+                            onTapOutside: (_) {
+                              setState(() => _priceEditing = false);
+                              if (!_priceEditing && !_cameraActive && mounted) {
+                                _cameraActive = true;
+                                _cameraController?.start();
+                              }
+                            },
+                            onTap: () {
+                              if (!_priceEditing) {
+                                setState(() {
+                                  _priceEditing = true;
+                                  _cameraActive = false;
+                                  _cameraController?.stop();
+                                });
+                              }
                             },
                           ),
                         ],
@@ -1450,40 +1559,47 @@ class _MaterialReceiptDetailScreenState
             // Si viene de PO pero ya está enviado, solo mostrar valores
             if (hasPO && readOnly) ...[
               const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                            Text('Precio Lista', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.grey[600])),
-                            Text(
-                              item.priceListRate > 0 ? '\$${item.priceListRate.toStringAsFixed(2)}' : '-',
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppDesign.navy),
-                            ),
-                        ],
-                      ),
+              Builder(
+                builder: (context) {
+                  final currency = context.read<InventoryProvider>().companyCurrency.isNotEmpty
+                      ? context.read<InventoryProvider>().companyCurrency
+                      : "\$";
+                  return Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                            Text('Monto Neto', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.grey[600])),
-                            Text(
-                              item.netAmount > 0 ? '\$${item.netAmount.toStringAsFixed(2)}' : '-',
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppDesign.navy),
-                            ),
-                        ],
-                      ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                                Text('Precio Lista', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.grey[600])),
+                                Text(
+                                  item.priceListRate > 0 ? '$currency${item.priceListRate.toStringAsFixed(2)}' : '-',
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppDesign.navy),
+                                ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                                Text('Monto Neto', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.grey[600])),
+                                Text(
+                                  item.netAmount > 0 ? '$currency${item.netAmount.toStringAsFixed(2)}' : '-',
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppDesign.navy),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
             ],
           ],

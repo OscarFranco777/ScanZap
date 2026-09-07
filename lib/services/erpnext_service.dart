@@ -10,6 +10,7 @@ class ErpNextService {
   String baseUrl = '';
   String _username = '';
   String _password = '';
+  String currency = 'HNL'; // Moneda de la company (se actualiza al conectar)
 
   late final Dio _dio;
   late final CookieJar _cookieJar;
@@ -544,7 +545,7 @@ class ErpNextService {
       'supplier': supplier,
       'transaction_date': scheduleDate,
       'schedule_date': scheduleDate,
-      'currency': 'HNL',
+      'currency': currency,
       if (namingSeries.isNotEmpty) 'naming_series': namingSeries,
       if (costCenter.isNotEmpty) 'cost_center': costCenter,
       if (setWarehouse.isNotEmpty) 'set_warehouse': setWarehouse,
@@ -1083,6 +1084,43 @@ class ErpNextService {
     } catch (e) {
       print('[Service] getPurchaseReceipt error: $e');
       return null;
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // COMPANY / CURRENCY
+  // ══════════════════════════════════════════════════════════════
+
+  /// Obtiene la moneda por defecto de la company del ERPNext.
+  /// Primero busca la company del usuario logueado, luego obtiene su moneda.
+  Future<String> fetchCompanyCurrency() async {
+    try {
+      // Paso 1: Obtener la company del usuario logueado
+      final userResponse = await _dio.get(
+        '$baseUrl/api/resource/User/${Uri.encodeComponent(_loggedUser)}',
+        queryParameters: {'fields': '["company"]'},
+      );
+      if (userResponse.statusCode != 200) return '';
+      final companyName = userResponse.data?['data']?['company'];
+      if (companyName == null || companyName.toString().isEmpty) return '';
+
+      // Paso 2: Obtener la moneda de la company
+      final companyResponse = await _dio.get(
+        '$baseUrl/api/resource/Company/${Uri.encodeComponent(companyName)}',
+        queryParameters: {'fields': '["default_currency"]'},
+      );
+      if (companyResponse.statusCode == 200) {
+        final currency = companyResponse.data?['data']?['default_currency'];
+        if (currency != null && currency.toString().isNotEmpty) {
+          print('[Service] Company currency: $currency');
+          this.currency = currency.toString();
+          return currency.toString();
+        }
+      }
+      return '';
+    } catch (e) {
+      print('[Service] fetchCompanyCurrency error: $e');
+      return '';
     }
   }
 }

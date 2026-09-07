@@ -37,6 +37,7 @@ class InventoryProvider with ChangeNotifier {
 
   // ─── Config ERPNext ───
   String warehouse = '';
+  String companyCurrency = '';
 
   // ─── Getters ───
   List<InventoryRow> get scannedItems =>
@@ -72,6 +73,15 @@ class InventoryProvider with ChangeNotifier {
     connectionError = '';
     isLoadingItems = true;
     notifyListeners();
+
+    // Cargar moneda guardada como fallback
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedCurrency = prefs.getString('erpnext_currency') ?? '';
+      if (savedCurrency.isNotEmpty) {
+        companyCurrency = savedCurrency;
+      }
+    } catch (_) {}
 
     try {
       erpNextService.configure(url: url);
@@ -115,6 +125,14 @@ class InventoryProvider with ChangeNotifier {
 
       isConnected = true;
       isLoadingItems = false;
+
+      // Obtener moneda de la company
+      try {
+        companyCurrency = await erpNextService.fetchCompanyCurrency();
+        print('[Provider] Company currency: $companyCurrency');
+      } catch (_) {
+        companyCurrency = '';
+      }
 
       // Guardar configuración
       await _saveConfig(url, username, rememberMe ? password : '');
@@ -438,6 +456,10 @@ class InventoryProvider with ChangeNotifier {
       await prefs.remove('erpnext_password');
       await prefs.setBool('erpnext_remember', false);
     }
+    // Guardar moneda de la company
+    if (companyCurrency.isNotEmpty) {
+      await prefs.setString('erpnext_currency', companyCurrency);
+    }
   }
 
   Future<Map<String, String>> loadSavedConfig() async {
@@ -447,6 +469,7 @@ class InventoryProvider with ChangeNotifier {
       'username': prefs.getString('erpnext_username') ?? '',
       'password': prefs.getString('erpnext_password') ?? '',
       'remember': (prefs.getBool('erpnext_remember') ?? false).toString(),
+      'currency': prefs.getString('erpnext_currency') ?? '',
     };
   }
 }
