@@ -1023,210 +1023,224 @@ class _MaterialReceiptDetailScreenState
             ),
           ),
 
-        const SizedBox(height: 8),
+        // ─── CONTENIDO SCROLLABLE (entre controles y botones) ───
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 8),
 
-        // ─── CÁMARA COLAPSADA (indicador al editar precios) ───
-        if (_priceEditing && !_cameraActive)
-          GestureDetector(
-            onTap: () {
-              setState(() {
-                _priceEditing = false;
-                _cameraActive = true;
-                _cameraController?.start();
-              });
-            },
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppDesign.blueLight.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppDesign.blueIcon.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.camera_alt, size: 16, color: AppDesign.blueIcon),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Expandir cámara',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppDesign.blueIcon,
+                // ─── CÁMARA COLAPSADA (indicador al editar precios) ───
+                if (_priceEditing && !_cameraActive)
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _priceEditing = false;
+                        _cameraActive = true;
+                        _cameraController?.start();
+                      });
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppDesign.blueLight.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppDesign.blueIcon.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.camera_alt, size: 16, color: AppDesign.blueIcon),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Expandir cámara',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppDesign.blueIcon,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
+
+                // ─── SERIE DE NUMERACIÓN (solo si viene desde PO y no tiene serie) ───
+                if (!provider.isSaved && receipt.namingSeries.isEmpty && !provider.isSubmitted)
+                  Consumer<MaterialReceiptProvider>(
+                    builder: (context, mrProvider, _) {
+                      final series = mrProvider.namingSeriesOptions;
+                      final loaded = mrProvider.catalogsLoaded;
+                      if (!loaded || series.isEmpty) return const SizedBox.shrink();
+                      return Container(
+                        margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppDesign.navy.withValues(alpha: 0.06),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Serie de Numeración *',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.grey[500],
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            DropdownButtonFormField<String>(
+                              isExpanded: true,
+                              isDense: true,
+                              initialValue: _selectedNamingSeries.isNotEmpty ? _selectedNamingSeries : null,
+                              decoration: InputDecoration(
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide(color: Colors.grey[300]!),
+                                ),
+                                filled: true,
+                                fillColor: Colors.grey[50],
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              ),
+                              hint: const Text('Seleccionar serie', style: TextStyle(fontSize: 13)),
+                              items: series.map((s) => DropdownMenuItem(
+                                value: s,
+                                child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+                              )).toList(),
+                              onChanged: (val) {
+                                setState(() => _selectedNamingSeries = val ?? '');
+                                if (val != null && receipt.namingSeries.isEmpty) {
+                                  receipt.namingSeries = val;
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+
+                // ─── INFO RECEPCIÓN ───
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppDesign.navy.withValues(alpha: 0.06),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      AppDesign.circleAvatar(
+                        icon: Icons.warehouse_outlined,
+                        bgColor: AppDesign.tealLight,
+                        iconColor: AppDesign.tealIcon,
+                        size: 30,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Almacén',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.grey[500],
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            Text(
+                              receipt.warehouse.isNotEmpty
+                                  ? receipt.warehouse
+                                  : 'Sin almacén',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                                color: AppDesign.navy,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      AppDesign.statusBadge(
+                        '${receipt.items.length} items — ${receipt.totalQty} uds',
+                        AppDesign.blueIcon,
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // ─── SECCIÓN ITEMS ───
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.inventory_2_outlined, size: 16, color: AppDesign.navy),
+                      const SizedBox(width: 6),
+                      Text(
+                        'ITEMS (${receipt.items.length})',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: AppDesign.navy,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                // ─── LISTA DE ITEMS ───
+                if (receipt.items.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: AppDesign.emptyState(
+                      icon: Icons.qr_code_scanner,
+                      title: 'Escaneá productos para agregar',
+                      subtitle: 'Usá la cámara o escribí el código',
+                    ),
+                  )
+                else
+                  ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    itemCount: receipt.items.length,
+                    itemBuilder: (context, index) {
+                      return _buildItemCard(receipt.items[index], index);
+                    },
+                  ),
+              ],
             ),
           ),
-
-        // ─── SERIE DE NUMERACIÓN (solo si viene desde PO y no tiene serie) ───
-        if (!provider.isSaved && receipt.namingSeries.isEmpty && !provider.isSubmitted)
-          Consumer<MaterialReceiptProvider>(
-            builder: (context, mrProvider, _) {
-              final series = mrProvider.namingSeriesOptions;
-              final loaded = mrProvider.catalogsLoaded;
-              if (!loaded || series.isEmpty) return const SizedBox.shrink();
-              return Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppDesign.navy.withValues(alpha: 0.06),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Serie de Numeración *',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.grey[500],
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      isDense: true,
-                      initialValue: _selectedNamingSeries.isNotEmpty ? _selectedNamingSeries : null,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: Colors.grey[300]!),
-                        ),
-                        filled: true,
-                        fillColor: Colors.grey[50],
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      ),
-                      hint: const Text('Seleccionar serie', style: TextStyle(fontSize: 13)),
-                      items: series.map((s) => DropdownMenuItem(
-                        value: s,
-                        child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
-                      )).toList(),
-                      onChanged: (val) {
-                        setState(() => _selectedNamingSeries = val ?? '');
-                        // Actualizar en el modelo
-                        if (val != null && receipt.namingSeries.isEmpty) {
-                          receipt.namingSeries = val;
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-
-        // ─── INFO RECEPCIÓN ───
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: AppDesign.navy.withValues(alpha: 0.06),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              AppDesign.circleAvatar(
-                icon: Icons.warehouse_outlined,
-                bgColor: AppDesign.tealLight,
-                iconColor: AppDesign.tealIcon,
-                size: 30,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Almacén',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.grey[500],
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    Text(
-                      receipt.warehouse.isNotEmpty
-                          ? receipt.warehouse
-                          : 'Sin almacén',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                        color: AppDesign.navy,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              AppDesign.statusBadge(
-                '${receipt.items.length} items — ${receipt.totalQty} uds',
-                AppDesign.blueIcon,
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 12),
-
-        // ─── SECCIÓN ITEMS ───
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            children: [
-              const Icon(Icons.inventory_2_outlined, size: 16, color: AppDesign.navy),
-              const SizedBox(width: 6),
-              Text(
-                'ITEMS (${receipt.items.length})',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: AppDesign.navy,
-                  letterSpacing: 0.6,
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 8),
-
-        // ─── LISTA DE ITEMS ───
-        Expanded(
-          child: receipt.items.isEmpty
-              ? AppDesign.emptyState(
-                  icon: Icons.qr_code_scanner,
-                  title: 'Escaneá productos para agregar',
-                  subtitle: 'Usá la cámara o escribí el código',
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: receipt.items.length,
-                  itemBuilder: (context, index) {
-                    return _buildItemCard(receipt.items[index], index);
-                  },
-                ),
         ),
 
         // ─── BOTÓN GUARDAR / ENVIAR ───
@@ -1475,12 +1489,7 @@ class _MaterialReceiptDetailScreenState
                               provider.updateItemPriceListRate(index, parsed);
                             },
                             onTapOutside: (_) {
-                              setState(() => _priceEditing = false);
-                              // Re-expandir cámara si no se está editando otro campo
-                              if (!_priceEditing && !_cameraActive && mounted) {
-                                _cameraActive = true;
-                                _cameraController?.start();
-                              }
+                              // La cámara permanece oculta hasta que el usuario la habilite manualmente
                             },
                             onTap: () {
                               if (!_priceEditing) {
@@ -1532,11 +1541,7 @@ class _MaterialReceiptDetailScreenState
                               provider.updateItemNetAmount(index, parsed);
                             },
                             onTapOutside: (_) {
-                              setState(() => _priceEditing = false);
-                              if (!_priceEditing && !_cameraActive && mounted) {
-                                _cameraActive = true;
-                                _cameraController?.start();
-                              }
+                              // La cámara permanece oculta hasta que el usuario la habilite manualmente
                             },
                             onTap: () {
                               if (!_priceEditing) {

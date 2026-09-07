@@ -1094,33 +1094,74 @@ class ErpNextService {
   /// Obtiene la moneda por defecto de la company del ERPNext.
   /// Primero busca la company del usuario logueado, luego obtiene su moneda.
   Future<String> fetchCompanyCurrency() async {
+    // Intento 1: company del usuario logueado
     try {
-      // Paso 1: Obtener la company del usuario logueado
       final userResponse = await _dio.get(
         '$baseUrl/api/resource/User/${Uri.encodeComponent(_loggedUser)}',
         queryParameters: {'fields': '["company"]'},
       );
-      if (userResponse.statusCode != 200) return '';
       final companyName = userResponse.data?['data']?['company'];
-      if (companyName == null || companyName.toString().isEmpty) return '';
-
-      // Paso 2: Obtener la moneda de la company
-      final companyResponse = await _dio.get(
-        '$baseUrl/api/resource/Company/${Uri.encodeComponent(companyName)}',
-        queryParameters: {'fields': '["default_currency"]'},
-      );
-      if (companyResponse.statusCode == 200) {
-        final currency = companyResponse.data?['data']?['default_currency'];
-        if (currency != null && currency.toString().isNotEmpty) {
-          print('[Service] Company currency: $currency');
-          this.currency = currency.toString();
-          return currency.toString();
+      if (companyName != null && companyName.toString().isNotEmpty) {
+        final companyResponse = await _dio.get(
+          '$baseUrl/api/resource/Company/${Uri.encodeComponent(companyName)}',
+          queryParameters: {'fields': '["default_currency"]'},
+        );
+        final cur = companyResponse.data?['data']?['default_currency'];
+        if (cur != null && cur.toString().isNotEmpty) {
+          print('[Service] Company currency (User): $cur');
+          this.currency = cur.toString();
+          return cur.toString();
         }
       }
-      return '';
     } catch (e) {
-      print('[Service] fetchCompanyCurrency error: $e');
-      return '';
+      print('[Service] fetchCompanyCurrency (User path) error: $e');
     }
+
+    // Intento 2: default_company del System Settings
+    try {
+      final sysRes = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_value',
+        queryParameters: {
+          'doctype': 'System Settings',
+          'fieldname': 'default_company',
+        },
+      );
+      final companyName = sysRes.data?['message']?.toString();
+      if (companyName != null && companyName.isNotEmpty) {
+        final companyResponse = await _dio.get(
+          '$baseUrl/api/resource/Company/${Uri.encodeComponent(companyName)}',
+          queryParameters: {'fields': '["default_currency"]'},
+        );
+        final cur = companyResponse.data?['data']?['default_currency'];
+        if (cur != null && cur.toString().isNotEmpty) {
+          print('[Service] Company currency (SystemSettings): $cur');
+          this.currency = cur.toString();
+          return cur.toString();
+        }
+      }
+    } catch (e) {
+      print('[Service] fetchCompanyCurrency (SysSettings path) error: $e');
+    }
+
+    // Intento 3: primera company de la lista
+    try {
+      final listRes = await _dio.get(
+        '$baseUrl/api/resource/Company',
+        queryParameters: {'fields': '["name","default_currency"]', 'limit_page_length': '1'},
+      );
+      final items = listRes.data?['data'];
+      if (items is List && items.isNotEmpty) {
+        final cur = items[0]['default_currency'];
+        if (cur != null && cur.toString().isNotEmpty) {
+          print('[Service] Company currency (first company): $cur');
+          this.currency = cur.toString();
+          return cur.toString();
+        }
+      }
+    } catch (e) {
+      print('[Service] fetchCompanyCurrency (fallback list) error: $e');
+    }
+
+    return '';
   }
 }
