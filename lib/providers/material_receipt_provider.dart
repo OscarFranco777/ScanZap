@@ -148,6 +148,9 @@ class MaterialReceiptProvider with ChangeNotifier {
           qty: (item['qty'] ?? 1).toInt(),
           uom: item['uom'] ?? 'Unidad',
           warehouse: warehouse.isNotEmpty ? warehouse : (item['warehouse'] ?? ''),
+          purchaseOrderItem: item['name'] ?? '',
+          priceListRate: (item['price_list_rate'] ?? 0).toDouble(),
+          netAmount: (item['net_amount'] ?? 0).toDouble(),
         );
       }).toList();
 
@@ -312,7 +315,7 @@ class MaterialReceiptProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      final items = currentReceipt!.items.map((item) => item.toMap()).toList();
+      final items = currentReceipt!.items.map((item) => item.toMap(purchaseOrder: currentReceipt!.purchaseOrder)).toList();
 
       Map<String, dynamic> result;
 

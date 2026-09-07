@@ -98,6 +98,9 @@ class MaterialReceiptItem {
   int qty;
   String uom;
   String warehouse;
+  String purchaseOrderItem; // ID del ítem en la PO (para vinculación)
+  double priceListRate; // Precio de lista (desde la PO)
+  double netAmount;     // Monto neto (desde la PO)
 
   MaterialReceiptItem({
     required this.itemCode,
@@ -105,6 +108,9 @@ class MaterialReceiptItem {
     this.qty = 1,
     this.uom = 'Unidad',
     this.warehouse = '',
+    this.purchaseOrderItem = '',
+    this.priceListRate = 0.0,
+    this.netAmount = 0.0,
   });
 
   Map<String, dynamic> toMap({String purchaseOrder = ''}) {
@@ -114,6 +120,10 @@ class MaterialReceiptItem {
       'warehouse': warehouse,
       'uom': uom,
       if (purchaseOrder.isNotEmpty) 'purchase_order': purchaseOrder,
+      if (purchaseOrderItem.isNotEmpty)
+        'purchase_order_item': purchaseOrderItem,
+      if (priceListRate > 0) 'price_list_rate': priceListRate,
+      if (netAmount > 0) 'net_amount': netAmount,
     };
   }
 
@@ -124,6 +134,9 @@ class MaterialReceiptItem {
       qty: (data['qty'] ?? 0).toInt(),
       uom: data['uom'] ?? 'Unidad',
       warehouse: data['warehouse'] ?? '',
+      purchaseOrderItem: data['purchase_order_item'] ?? '',
+      priceListRate: (data['price_list_rate'] ?? 0).toDouble(),
+      netAmount: (data['net_amount'] ?? 0).toDouble(),
     );
   }
 }

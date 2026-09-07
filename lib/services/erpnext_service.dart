@@ -912,6 +912,12 @@ class ErpNextService {
               'purchase_order_item': item['purchase_order_item'],
               if (item['uom'] != null) 'uom': item['uom'],
               if (item['rate'] != null) 'rate': item['rate'],
+              if (item['price_list_rate'] != null &&
+                  (item['price_list_rate'] as num) > 0)
+                'price_list_rate': item['price_list_rate'],
+              if (item['net_amount'] != null &&
+                  (item['net_amount'] as num) > 0)
+                'net_amount': item['net_amount'],
             },
           )
           .toList(),
@@ -947,6 +953,12 @@ class ErpNextService {
                 'purchase_order_item': item['purchase_order_item'],
               if (item['uom'] != null) 'uom': item['uom'],
               if (item['rate'] != null) 'rate': item['rate'],
+              if (item['price_list_rate'] != null &&
+                  (item['price_list_rate'] as num) > 0)
+                'price_list_rate': item['price_list_rate'],
+              if (item['net_amount'] != null &&
+                  (item['net_amount'] as num) > 0)
+                'net_amount': item['net_amount'],
             },
           )
           .toList(),
