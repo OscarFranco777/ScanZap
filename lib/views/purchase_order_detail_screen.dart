@@ -46,11 +46,15 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
   // ─── Purchase Receipt (recepción desde PO) ───
   bool _showPRForm = false;
+  bool _prCreationMode = false; // true = formulario, false = escáner
   bool _prLoading = false;
   String _prError = '';
   List<Map<String, dynamic>> _prItems = [];
   String _prWarehouse = '';
   String _prNamingSeries = '';
+  String _prCostCenter = '';
+  String _prSupplier = '';
+  DateTime _prDate = DateTime.now();
   List<String> _prNamingSeriesOptions = [];
   bool _prScannerActive = false;
   MobileScannerController? _prCameraController;
@@ -309,25 +313,49 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
     setState(() {
       _showPRForm = true;
+      _prCreationMode = true; // Mostrar formulario de creación primero
       _prLoading = true;
       _prError = '';
       _prItems = [];
       _prWarehouse = order.setWarehouse;
+      _prCostCenter = order.costCenter;
+      _prSupplier = order.supplier;
+      _prDate = order.scheduleDate;
+      _prNamingSeries = '';
       _prSaved = false;
       _prSavedName = '';
     });
 
     try {
       final service = context.read<ErpNextService>();
+      final series = await service.fetchPurchaseReceiptNamingSeries();
+      _prNamingSeriesOptions = series;
+      if (series.isNotEmpty) _prNamingSeries = series.first;
+    } catch (e) {
+      _prError = 'Error cargando series: $e';
+    }
 
-      final results = await Future.wait([
-        service.getPurchaseOrderDetail(order.id!),
-        service.fetchPurchaseReceiptNamingSeries(),
-      ]);
+    setState(() => _prLoading = false);
+  }
 
-      final poDetail = results[0] as Map<String, dynamic>?;
-      final series = results[1] as List<String>;
+  /// El usuario completó el formulario → pasar al escáner
+  Future<void> _startPRScanner() async {
+    if (_prNamingSeries.isEmpty) {
+      setState(() => _prError = 'Seleccioná una serie de numeración');
+      return;
+    }
 
+    setState(() {
+      _prLoading = true;
+      _prError = '';
+    });
+
+    try {
+      final service = context.read<ErpNextService>();
+      final provider = context.read<PurchaseOrderProvider>();
+      final order = provider.currentOrder;
+
+      final poDetail = await service.getPurchaseOrderDetail(order!.id!);
       if (poDetail != null && poDetail['items'] != null) {
         final items = List<Map<String, dynamic>>.from(poDetail['items']);
         _prItems = items
@@ -344,14 +372,14 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             )
             .toList();
       }
-
-      _prNamingSeriesOptions = series;
-      if (series.isNotEmpty) _prNamingSeries = series.first;
     } catch (e) {
-      _prError = 'Error cargando datos: $e';
+      _prError = 'Error cargando items: $e';
     }
 
-    setState(() => _prLoading = false);
+    setState(() {
+      _prCreationMode = false; // Pasar al escáner
+      _prLoading = false;
+    });
 
     _loadLinkedPRs();
   }
@@ -591,6 +619,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     _prCameraController?.stop();
     setState(() {
       _showPRForm = false;
+      _prCreationMode = false;
       _prScannerActive = false;
       _prItems = [];
       _prError = '';
@@ -598,6 +627,18 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       _prSavedName = '';
       _linkedPRsLoaded = false;
     });
+  }
+
+  Future<void> _selectPRDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _prDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null) {
+      setState(() => _prDate = picked);
+    }
   }
 
   Future<void> _loadLinkedPRs() async {
@@ -1043,6 +1084,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadLinkedPRs());
     }
 
+    if (_showPRForm && _prCreationMode) {
+      return _buildPRCreationForm(order);
+    }
     if (_showPRForm) {
       return _buildPRForm(order);
     }
@@ -1564,6 +1608,291 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             ),
           ),
       ],
+    );
+  }
+
+  /// Formulario de creación de Purchase Receipt — igual que crear OC.
+  Widget _buildPRCreationForm(PurchaseOrder order) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ─── Card central con ícono ───
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: AppDesign.cardWhite,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: AppDesign.navy.withValues(alpha: 0.08),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                AppDesign.circleAvatar(
+                  icon: Icons.local_shipping,
+                  bgColor: AppDesign.tealLight,
+                  iconColor: AppDesign.tealIcon,
+                  size: 56,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Crear Recepción de Mercadería',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: AppDesign.navy,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'PO: ${order.id ?? ""}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[500],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ─── Serie de Numeración ───
+          _buildSectionLabel('SERIE DE NUMERACIÓN'),
+          const SizedBox(height: 6),
+          if (_prLoading)
+            _buildDropdownField(
+              label: 'Serie de Numeración *',
+              icon: Icons.tag,
+              hint: 'Cargando...',
+              items: const [],
+              value: null,
+              enabled: false,
+            )
+          else if (_prNamingSeriesOptions.isEmpty)
+            _buildDropdownField(
+              label: 'Serie de Numeración *',
+              icon: Icons.tag,
+              hint: 'No hay series disponibles',
+              items: const [],
+              value: null,
+              enabled: false,
+            )
+          else
+            _buildDropdownField(
+              label: 'Serie de Numeración *',
+              icon: Icons.tag,
+              hint: 'Seleccionar serie',
+              items: _prNamingSeriesOptions
+                  .map((s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ))
+                  .toList(),
+              value: _prNamingSeriesOptions.contains(_prNamingSeries)
+                  ? _prNamingSeries
+                  : _prNamingSeriesOptions.first,
+              onChanged: (val) => setState(() => _prNamingSeries = val ?? ''),
+            ),
+
+          const SizedBox(height: 16),
+
+          // ─── Proveedor (pre-llenado, solo lectura) ───
+          _buildSectionLabel('PROVEEDOR'),
+          const SizedBox(height: 6),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TextField(
+              controller: TextEditingController(text: _prSupplier),
+              readOnly: true,
+              decoration: InputDecoration(
+                labelText: 'Proveedor',
+                prefixIcon: const Icon(Icons.business, color: AppDesign.navy),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                filled: true,
+                fillColor: Colors.grey[50],
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ─── Fecha (pre-llenada, editable) ───
+          _buildSectionLabel('FECHA DE ENTREGA'),
+          const SizedBox(height: 6),
+          Container(
+            decoration: BoxDecoration(
+              color: AppDesign.cardWhite,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: AppDesign.navy.withValues(alpha: 0.06),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: InkWell(
+              onTap: _selectPRDate,
+              borderRadius: BorderRadius.circular(12),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Fecha de Entrega *',
+                  prefixIcon: const Icon(Icons.calendar_today, color: AppDesign.navy),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: AppDesign.cardWhite,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+                child: Text(
+                  DateFormat('dd/MM/yyyy').format(_prDate),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ─── Almacén Destino (pre-llenado, solo lectura) ───
+          _buildSectionLabel('ALMACÉN DESTINO'),
+          const SizedBox(height: 6),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TextField(
+              controller: TextEditingController(text: _prWarehouse),
+              readOnly: true,
+              decoration: InputDecoration(
+                labelText: 'Almacén Destino',
+                prefixIcon: const Icon(Icons.warehouse, color: AppDesign.navy),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                filled: true,
+                fillColor: Colors.grey[50],
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ─── Centro de Costos (pre-llenado, solo lectura) ───
+          _buildSectionLabel('CENTRO DE COSTOS'),
+          const SizedBox(height: 6),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TextField(
+              controller: TextEditingController(text: _prCostCenter),
+              readOnly: true,
+              decoration: InputDecoration(
+                labelText: 'Centro de Costos',
+                prefixIcon: const Icon(Icons.account_balance, color: AppDesign.navy),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                filled: true,
+                fillColor: Colors.grey[50],
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              ),
+            ),
+          ),
+
+          // ─── Error ───
+          if (_prError.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppDesign.statusCancelled.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                _prError,
+                style: const TextStyle(color: AppDesign.statusCancelled, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 24),
+
+          // ─── Botón Crear ───
+          SizedBox(
+            height: 52,
+            child: ElevatedButton.icon(
+              onPressed: _prLoading ? null : _startPRScanner,
+              icon: _prLoading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.arrow_forward, size: 20),
+              label: const Text(
+                'Crear y Escanear',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppDesign.tealIcon,
+                foregroundColor: Colors.white,
+                elevation: 4,
+                shadowColor: AppDesign.tealIcon.withValues(alpha: 0.4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // ─── Botón Cancelar ───
+          SizedBox(
+            height: 48,
+            child: TextButton(
+              onPressed: _closePRForm,
+              child: Text(
+                'Cancelar',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
