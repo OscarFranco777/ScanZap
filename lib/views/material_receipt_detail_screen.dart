@@ -1232,6 +1232,7 @@ class _MaterialReceiptDetailScreenState
   Widget _buildItemCard(MaterialReceiptItem item, int index) {
     final provider = context.read<MaterialReceiptProvider>();
     final readOnly = provider.isSubmitted;
+    final hasPO = item.purchaseOrderItem.isNotEmpty;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
@@ -1248,98 +1249,243 @@ class _MaterialReceiptDetailScreenState
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Avatar
-            AppDesign.circleAvatar(
-              icon: Icons.inventory_2_outlined,
-              bgColor: readOnly ? Colors.grey[200]! : AppDesign.tealLight,
-              iconColor: readOnly ? Colors.grey[500]! : AppDesign.tealIcon,
-              size: 36,
-            ),
-            const SizedBox(width: 10),
-            // Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.itemName.isNotEmpty ? item.itemName : item.itemCode,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: readOnly ? Colors.grey[600] : AppDesign.navy,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    item.itemCode,
-                    style: TextStyle(color: Colors.grey[500], fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-            // Controles
-            if (readOnly)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppDesign.accent.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
+            // Fila principal: avatar + nombre + controles cantidad
+            Row(
+              children: [
+                // Avatar
+                AppDesign.circleAvatar(
+                  icon: Icons.inventory_2_outlined,
+                  bgColor: readOnly ? Colors.grey[200]! : AppDesign.tealLight,
+                  iconColor: readOnly ? Colors.grey[500]! : AppDesign.tealIcon,
+                  size: 36,
                 ),
-                child: Text(
-                  '${item.qty}',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppDesign.navy,
-                  ),
-                ),
-              )
-            else
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  GestureDetector(
-                    onTap: () => provider.updateItemQty(index, item.qty - 1),
-                    child: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
+                const SizedBox(width: 10),
+                // Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.itemName.isNotEmpty ? item.itemName : item.itemCode,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: readOnly ? Colors.grey[600] : AppDesign.navy,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      child: const Icon(Icons.remove, size: 16, color: Colors.red),
-                    ),
+                      const SizedBox(height: 2),
+                      Text(
+                        item.itemCode,
+                        style: TextStyle(color: Colors.grey[500], fontSize: 11),
+                      ),
+                    ],
                   ),
+                ),
+                // Controles cantidad
+                if (readOnly)
                   Container(
-                    width: 40,
-                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppDesign.accent.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                     child: Text(
                       '${item.qty}',
                       style: const TextStyle(
-                        fontSize: 17,
+                        fontSize: 16,
                         fontWeight: FontWeight.w800,
                         color: AppDesign.navy,
                       ),
                     ),
-                  ),
-                  GestureDetector(
-                    onTap: () => provider.updateItemQty(index, item.qty + 1),
-                    child: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                        color: AppDesign.greenIcon.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
+                  )
+                else
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        onTap: () => provider.updateItemQty(index, item.qty - 1),
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.remove, size: 16, color: Colors.red),
+                        ),
                       ),
-                      child: const Icon(Icons.add, size: 16, color: AppDesign.greenIcon),
-                    ),
+                      Container(
+                        width: 40,
+                        alignment: Alignment.center,
+                        child: Text(
+                          '${item.qty}',
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: AppDesign.navy,
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => provider.updateItemQty(index, item.qty + 1),
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: AppDesign.greenIcon.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.add, size: 16, color: AppDesign.greenIcon),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+              ],
+            ),
+
+            // Fila de precios (solo si viene de PO y no está enviado)
+            if (hasPO && !readOnly) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppDesign.blueLight.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    // Price List Rate
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Precio Lista',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.grey[600],
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          TextField(
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: BorderSide(color: Colors.grey[300]!),
+                              ),
+                              filled: true,
+                              fillColor: Colors.white,
+                              prefixText: '\$ ',
+                              prefixStyle: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                            ),
+                            controller: TextEditingController(
+                              text: item.priceListRate > 0 ? item.priceListRate.toStringAsFixed(2) : '',
+                            ),
+                            onChanged: (val) {
+                              final parsed = double.tryParse(val) ?? 0.0;
+                              provider.updateItemPriceListRate(index, parsed);
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Net Amount
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Monto Neto',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.grey[600],
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          TextField(
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: BorderSide(color: Colors.grey[300]!),
+                              ),
+                              filled: true,
+                              fillColor: Colors.white,
+                              prefixText: '\$ ',
+                              prefixStyle: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                            ),
+                            controller: TextEditingController(
+                              text: item.netAmount > 0 ? item.netAmount.toStringAsFixed(2) : '',
+                            ),
+                            onChanged: (val) {
+                              final parsed = double.tryParse(val) ?? 0.0;
+                              provider.updateItemNetAmount(index, parsed);
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ],
+
+            // Si viene de PO pero ya está enviado, solo mostrar valores
+            if (hasPO && readOnly) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                            Text('Precio Lista', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.grey[600])),
+                            Text(
+                              item.priceListRate > 0 ? '\$${item.priceListRate.toStringAsFixed(2)}' : '-',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppDesign.navy),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                            Text('Monto Neto', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.grey[600])),
+                            Text(
+                              item.netAmount > 0 ? '\$${item.netAmount.toStringAsFixed(2)}' : '-',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppDesign.navy),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),

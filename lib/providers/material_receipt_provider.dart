@@ -293,6 +293,20 @@ class MaterialReceiptProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Actualiza el price_list_rate de un item (sin notify para no perder cursor del TextField).
+  void updateItemPriceListRate(int index, double value) {
+    if (currentReceipt == null) return;
+    if (index < 0 || index >= currentReceipt!.items.length) return;
+    currentReceipt!.items[index].priceListRate = value;
+  }
+
+  /// Actualiza el net_amount de un item (sin notify para no perder cursor del TextField).
+  void updateItemNetAmount(int index, double value) {
+    if (currentReceipt == null) return;
+    if (index < 0 || index >= currentReceipt!.items.length) return;
+    currentReceipt!.items[index].netAmount = value;
+  }
+
   /// Elimina un item de la recepción.
   void removeItem(int index) {
     if (currentReceipt == null) return;
