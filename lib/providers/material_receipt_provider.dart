@@ -373,6 +373,9 @@ class MaterialReceiptProvider with ChangeNotifier {
       // Refrescar la lista de recepciones para que aparezca la nueva
       fetchReceipts();
 
+      // Refrescar la recepción desde ERPNext para obtener precios actualizados
+      await refreshReceipt();
+
       isLoading = false;
       notifyListeners();
       return true;
@@ -415,6 +418,9 @@ class MaterialReceiptProvider with ChangeNotifier {
 
       // Refrescar la lista de recepciones para que actualice el estado
       fetchReceipts();
+
+      // Refrescar la recepción desde ERPNext para obtener precios actualizados
+      await refreshReceipt();
 
       isLoading = false;
       notifyListeners();
