@@ -64,7 +64,11 @@ class AppDesign {
                     color: Colors.white.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+                  child: const Icon(
+                    Icons.arrow_back_ios_new,
+                    color: Colors.white,
+                    size: 18,
+                  ),
                 ),
               ),
             if (showBack) const SizedBox(width: 12),
@@ -102,7 +106,7 @@ class AppDesign {
                 ],
               ),
             ),
-            if (actions != null) ...actions,
+            ...?actions,
           ],
         ),
       ),
@@ -113,7 +117,10 @@ class AppDesign {
   // STATS CARD — tarjeta oscura con métricas
   // ══════════════════════════════════════════════════════════════
 
-  static Widget buildStatsCard({required List<Widget> children, bool compact = false}) {
+  static Widget buildStatsCard({
+    required List<Widget> children,
+    bool compact = false,
+  }) {
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       padding: compact ? const EdgeInsets.all(8) : const EdgeInsets.all(14),
@@ -132,7 +139,10 @@ class AppDesign {
     );
   }
 
-  static Widget buildStatRow({required List<Widget> items, bool compact = false}) {
+  static Widget buildStatRow({
+    required List<Widget> items,
+    bool compact = false,
+  }) {
     return Padding(
       padding: EdgeInsets.only(bottom: compact ? 4 : 10),
       child: Row(
@@ -155,7 +165,9 @@ class AppDesign {
     bool compact = false,
   }) {
     return Container(
-      padding: compact ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6) : const EdgeInsets.all(10),
+      padding: compact
+          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6)
+          : const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
@@ -276,10 +288,7 @@ class AppDesign {
           Container(
             width: 80,
             height: 80,
-            decoration: BoxDecoration(
-              color: bg,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
             child: Icon(icon, size: 36, color: Colors.grey[400]),
           ),
           const SizedBox(height: 16),

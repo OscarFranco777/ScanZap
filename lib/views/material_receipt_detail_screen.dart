@@ -29,6 +29,10 @@ class _MaterialReceiptDetailScreenState
   bool _scanLocked = false;
   String _lastScannedCode = '';
   Timer? _lockTimer;
+  // ─── Pila de escaneos: se procesan en cola, sin perder ninguno ───
+  final List<String> _scanQueue = [];
+  bool _isProcessingScan = false;
+  int _scansSinceLastMsg = 0;
 
   // ─── Formulario ───
   String _pendingPOName = '';
@@ -111,6 +115,7 @@ class _MaterialReceiptDetailScreenState
   void dispose() {
     _cameraController?.dispose();
     _lockTimer?.cancel();
+    _scanQueue.clear();
     _supplierController.dispose();
     _scanController.dispose();
     _qtyController.dispose();
@@ -135,29 +140,34 @@ class _MaterialReceiptDetailScreenState
 
     _scanLocked = true;
     _lastScannedCode = code;
-    _cameraController?.stop();
 
-    _processScan(code);
+    // Encolar el escaneo y seguir escaneando — la pila procesa sola
+    _scanQueue.add(code);
+    _drainScanQueue();
   }
 
-  void _processScan(String code) {
-    if (code.trim().isEmpty) return;
-    HapticFeedback.mediumImpact();
-
-    final provider = context.read<MaterialReceiptProvider>();
-    final qty = int.tryParse(_qtyController.text.trim()) ?? 1;
-    provider.scanItemToReceipt(code, quantity: qty);
-    _qtyController.text = '1';
-    _scanController.clear();
-
-    _lockTimer?.cancel();
-    _lockTimer = Timer(const Duration(seconds: 2), () {
-      _scanLocked = false;
+  /// Procesa la pila de escaneos uno por uno, sin solaparse.
+  Future<void> _drainScanQueue() async {
+    if (_isProcessingScan) return;
+    _isProcessingScan = true;
+    while (_scanQueue.isNotEmpty && mounted) {
+      final code = _scanQueue.removeAt(0);
+      HapticFeedback.mediumImpact();
+      try {
+        final provider = context.read<MaterialReceiptProvider>();
+        final qty = int.tryParse(_qtyController.text.trim()) ?? 1;
+        await provider.scanItemToReceipt(code, quantity: qty);
+        _qtyController.text = '1';
+        _scanController.clear();
+        _scansSinceLastMsg++;
+      } catch (_) {}
+      // Pausa mínima para que el mismo código no vuelva a entrar en cola
+      // de inmediato (anti-doble-lectura), pero sin bloquear nuevos códigos
       _lastScannedCode = '';
-      if (_cameraActive && mounted) {
-        _cameraController?.start();
-      }
-    });
+      _scanLocked = false;
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+    _isProcessingScan = false;
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -577,6 +587,9 @@ class _MaterialReceiptDetailScreenState
                         final s = _supplierSuggestions[index];
                         return ListTile(
                           dense: true,
+                          tileColor: Colors.transparent,
+                          hoverColor: Colors.grey[200],
+                          focusColor: Colors.grey[300],
                           leading: AppDesign.circleAvatar(
                             icon: Icons.business,
                             bgColor: AppDesign.blueLight,
@@ -825,7 +838,9 @@ class _MaterialReceiptDetailScreenState
                   child: Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: _scanLocked ? AppDesign.statusDraft : AppDesign.accent,
+                        color: _isProcessingScan
+                            ? AppDesign.statusDraft
+                            : AppDesign.accent,
                         width: 2.5,
                       ),
                     ),
@@ -838,13 +853,15 @@ class _MaterialReceiptDetailScreenState
                           vertical: 5,
                         ),
                         decoration: BoxDecoration(
-                          color: (_scanLocked ? AppDesign.statusDraft : AppDesign.accent)
+                          color: (_isProcessingScan
+                                  ? AppDesign.statusDraft
+                                  : AppDesign.accent)
                               .withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Text(
-                          _scanLocked
-                              ? '⏳ Esperá...'
+                          _isProcessingScan
+                              ? '📦 Pila: ${_scanQueue.length + 1} en cola...'
                               : '📷 Escaneá un producto',
                           style: const TextStyle(
                             color: Colors.white,
@@ -963,7 +980,10 @@ class _MaterialReceiptDetailScreenState
                             ),
                           ),
                           onSubmitted: (v) {
-                            if (v.trim().isNotEmpty) _processScan(v);
+                            if (v.trim().isNotEmpty) {
+                              _scanQueue.add(v.trim());
+                              _drainScanQueue();
+                            }
                           },
                         ),
                       ),

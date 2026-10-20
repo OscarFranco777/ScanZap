@@ -186,9 +186,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
     final newItems = countAfter - countBefore;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(newItems > 0
-            ? '✅ Se encontraron $newItems productos nuevos (total: $countAfter)'
-            : '🔄 Lista actualizada ($countAfter productos) — sin cambios'),
+        content: Text(
+          newItems > 0
+              ? '✅ Se encontraron $newItems productos nuevos (total: $countAfter)'
+              : '🔄 Lista actualizada ($countAfter productos) — sin cambios',
+        ),
         backgroundColor: newItems > 0 ? Colors.green : Colors.blue,
         duration: const Duration(seconds: 3),
       ),
@@ -273,306 +275,321 @@ class _ScannerScreenState extends State<ScannerScreen> {
           // ─── Header personalizado ───
           AppDesign.buildHeader(
             title: 'Gestión de Inventario',
-            subtitle: '${provider.uniqueProducts} productos • ${provider.totalUnitsScanned} uds • L${provider.totalInventoryValue.toStringAsFixed(2)}',
+            subtitle:
+                '${provider.uniqueProducts} productos • ${provider.totalUnitsScanned} uds • L${provider.totalInventoryValue.toStringAsFixed(2)}',
             icon: Icons.qr_code_scanner,
             onBack: () => Navigator.pop(context),
           ),
 
           // ─── ZONA DE CÁMARA ───
-            if (_cameraActive)
-              SizedBox(
-                height: _getCameraHeight(context),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (_cameraController != null)
-                      MobileScanner(
-                        controller: _cameraController!,
-                        onDetect: _onBarcodeDetected,
-                      ),
-                    // Borde de cámara
-                    Positioned.fill(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: _scanLocked ? Colors.orange : Colors.blue,
-                            width: 2,
-                          ),
+          if (_cameraActive)
+            SizedBox(
+              height: _getCameraHeight(context),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (_cameraController != null)
+                    MobileScanner(
+                      controller: _cameraController!,
+                      onDetect: _onBarcodeDetected,
+                    ),
+                  // Borde de cámara
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: _scanLocked ? Colors.orange : Colors.blue,
+                          width: 2,
                         ),
-                        child: Align(
-                          alignment: Alignment.topCenter,
-                          child: Container(
-                            margin: const EdgeInsets.only(top: 6),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _scanLocked
-                                  ? Colors.orange.withOpacity(0.9)
-                                  : Colors.blue.withOpacity(0.9),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Text(
-                              _scanLocked
-                                  ? '⏳ Esperá...'
-                                  : '📷 Apuntá al código',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
+                      ),
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: Container(
+                          margin: const EdgeInsets.only(top: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _scanLocked
+                                ? Colors.orange.withValues(alpha: 0.9)
+                                : Colors.blue.withValues(alpha: 0.9),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            _scanLocked ? '⏳ Esperá...' : '📷 Apuntá al código',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
                             ),
                           ),
                         ),
                       ),
                     ),
-                    // Botones de cámara — posicionados dentro del área visible
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _camButton(
-                            icon: _cameraController?.torchEnabled == true
-                                ? Icons.flash_on
-                                : Icons.flash_off,
-                            onTap: _toggleTorch,
-                            tooltip: 'Linterna',
-                          ),
-                          const SizedBox(height: 4),
-                          _camButton(
-                            icon: _cameraActive
-                                ? Icons.videocam
-                                : Icons.videocam_off,
-                            onTap: _toggleCamera,
-                            tooltip: _cameraActive ? 'Apagar cámara' : 'Prender cámara',
-                          ),
-                        ],
-                      ),
+                  ),
+                  // Botones de cámara — posicionados dentro del área visible
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _camButton(
+                          icon: _cameraController?.torchEnabled == true
+                              ? Icons.flash_on
+                              : Icons.flash_off,
+                          onTap: _toggleTorch,
+                          tooltip: 'Linterna',
+                        ),
+                        const SizedBox(height: 4),
+                        _camButton(
+                          icon: _cameraActive
+                              ? Icons.videocam
+                              : Icons.videocam_off,
+                          onTap: _toggleCamera,
+                          tooltip: _cameraActive
+                              ? 'Apagar cámara'
+                              : 'Prender cámara',
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
+            ),
 
-            // ─── CONTROLES + LISTA — scrolleable ───
-            Expanded(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).viewInsets.bottom,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // ─── Campos de entrada ───
-                    Container(
-                      color: Colors.blue[50],
-                      padding: const EdgeInsets.all(8),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              // Campo cantidad — más ancho para 4 dígitos
-                              SizedBox(
-                                width: 70,
-                                child: TextField(
-                                  controller: _qtyController,
-                                  keyboardType: TextInputType.number,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Cant.',
-                                    hintText: '1',
-                                    border: OutlineInputBorder(),
-                                    filled: true,
-                                    fillColor: Colors.white,
-                                    isDense: true,
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                      vertical: 10,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              // Campo código
-                              Expanded(
-                                child: TextField(
-                                  controller: _scanController,
-                                  focusNode: _focusNode,
-                                  style: const TextStyle(fontSize: 13),
-                                  decoration: const InputDecoration(
-                                    labelText: 'Código',
-                                    hintText: 'Escanear...',
-                                    prefixIcon: Icon(Icons.qr_code_scanner, size: 18),
-                                    border: OutlineInputBorder(),
-                                    filled: true,
-                                    fillColor: Colors.white,
-                                    isDense: true,
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 8,
-                                    ),
-                                  ),
-                                  onSubmitted: _processScan,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              // Botón entrada manual
-                              IconButton(
-                                onPressed: _showManualEntry,
-                                icon: const Icon(Icons.edit, size: 20),
-                                tooltip: 'Entrada manual',
-                                style: IconButton.styleFrom(
-                                  backgroundColor: Colors.blue,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.all(6),
-                                  minimumSize: const Size(36, 36),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-
-                          // Último escaneo
-                          if (provider.lastScannedCode.isNotEmpty)
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: provider.lastScanWasError
-                                    ? Colors.red[50]
-                                    : Colors.green[50],
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                provider.lastScanMessage,
-                                style: TextStyle(
-                                  color: provider.lastScanWasError
-                                      ? Colors.red[800]
-                                      : Colors.green[800],
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-
-                    // ─── BOTONES DE ACCIÓN — sin cortar texto ───
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      child: Row(
-                        children: [
-                          _actionButton(
-                            icon: Icons.share,
-                            label: 'Compartir',
-                            onTap: _shareReport,
-                          ),
-                          const SizedBox(width: 6),
-                          _actionButton(
-                            icon: Icons.upload_file,
-                            label: 'Costos\nExcel',
-                            onTap: () => Navigator.of(context).pushNamed('/excel'),
-                          ),
-                          const SizedBox(width: 6),
-                          _actionButton(
-                            icon: Icons.table_chart,
-                            label: 'Ver\nReporte',
-                            onTap: () => Navigator.of(context).pushNamed('/report'),
-                          ),
-                          const SizedBox(width: 6),
-                          _actionButton(
-                            icon: Icons.delete_sweep,
-                            label: 'Limpiar',
-                            color: Colors.red,
-                            onTap: _confirmClear,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Botón refrescar
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed:
-                              provider.isLoadingItems ? null : _refreshItems,
-                          icon: provider.isLoadingItems
-                              ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.refresh, size: 14),
-                          label: Text(
-                            provider.isLoadingItems
-                                ? 'Actualizando...'
-                                : '🔄 Refrescar productos',
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const Divider(height: 1),
-
-                    // ─── LISTA DE PRODUCTOS ESCANEADOS ───
-                    if (scanned.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
+          // ─── CONTROLES + LISTA — scrolleable ───
+          Expanded(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ─── Campos de entrada ───
+                  Container(
+                    color: Colors.blue[50],
+                    padding: const EdgeInsets.all(8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
                           children: [
-                            Icon(
-                              Icons.qr_code_scanner,
-                              size: 60,
-                              color: Colors.grey[300],
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Escanee un código de barras',
-                              style: TextStyle(
-                                color: Colors.grey[500],
-                                fontSize: 15,
+                            // Campo cantidad — más ancho para 4 dígitos
+                            SizedBox(
+                              width: 70,
+                              child: TextField(
+                                controller: _qtyController,
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Cant.',
+                                  hintText: '1',
+                                  border: OutlineInputBorder(),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 10,
+                                  ),
+                                ),
                               ),
                             ),
-                            Text(
-                              'o use la entrada manual',
-                              style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                            const SizedBox(width: 6),
+                            // Campo código
+                            Expanded(
+                              child: TextField(
+                                controller: _scanController,
+                                focusNode: _focusNode,
+                                style: const TextStyle(fontSize: 13),
+                                decoration: const InputDecoration(
+                                  labelText: 'Código',
+                                  hintText: 'Escanear...',
+                                  prefixIcon: Icon(
+                                    Icons.qr_code_scanner,
+                                    size: 18,
+                                  ),
+                                  border: OutlineInputBorder(),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 8,
+                                  ),
+                                ),
+                                onSubmitted: _processScan,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            // Botón entrada manual
+                            IconButton(
+                              onPressed: _showManualEntry,
+                              icon: const Icon(Icons.edit, size: 20),
+                              tooltip: 'Entrada manual',
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.all(6),
+                                minimumSize: const Size(36, 36),
+                              ),
                             ),
                           ],
                         ),
-                      )
-                    else
-                      ListView.builder(
-                        itemCount: scanned.length,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        itemBuilder: (context, index) {
-                          final row = scanned[index];
-                          return _buildItemCard(row, provider);
-                        },
+                        const SizedBox(height: 6),
+
+                        // Último escaneo
+                        if (provider.lastScannedCode.isNotEmpty)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: provider.lastScanWasError
+                                  ? Colors.red[50]
+                                  : Colors.green[50],
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              provider.lastScanMessage,
+                              style: TextStyle(
+                                color: provider.lastScanWasError
+                                    ? Colors.red[800]
+                                    : Colors.green[800],
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  // ─── BOTONES DE ACCIÓN — sin cortar texto ───
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
+                    child: Row(
+                      children: [
+                        _actionButton(
+                          icon: Icons.share,
+                          label: 'Compartir',
+                          onTap: _shareReport,
+                        ),
+                        const SizedBox(width: 6),
+                        _actionButton(
+                          icon: Icons.upload_file,
+                          label: 'Costos\nExcel',
+                          onTap: () =>
+                              Navigator.of(context).pushNamed('/excel'),
+                        ),
+                        const SizedBox(width: 6),
+                        _actionButton(
+                          icon: Icons.table_chart,
+                          label: 'Ver\nReporte',
+                          onTap: () =>
+                              Navigator.of(context).pushNamed('/report'),
+                        ),
+                        const SizedBox(width: 6),
+                        _actionButton(
+                          icon: Icons.delete_sweep,
+                          label: 'Limpiar',
+                          color: Colors.red,
+                          onTap: _confirmClear,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Botón refrescar
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: provider.isLoadingItems
+                            ? null
+                            : _refreshItems,
+                        icon: provider.isLoadingItems
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.refresh, size: 14),
+                        label: Text(
+                          provider.isLoadingItems
+                              ? 'Actualizando...'
+                              : '🔄 Refrescar productos',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                        ),
                       ),
-                  ],
-                ),
+                    ),
+                  ),
+
+                  const Divider(height: 1),
+
+                  // ─── LISTA DE PRODUCTOS ESCANEADOS ───
+                  if (scanned.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.qr_code_scanner,
+                            size: 60,
+                            color: Colors.grey[300],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Escanee un código de barras',
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 15,
+                            ),
+                          ),
+                          Text(
+                            'o use la entrada manual',
+                            style: TextStyle(
+                              color: Colors.grey[400],
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ListView.builder(
+                      itemCount: scanned.length,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      itemBuilder: (context, index) {
+                        final row = scanned[index];
+                        return _buildItemCard(row, provider);
+                      },
+                    ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -611,7 +628,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            border: Border.all(color: c.withOpacity(0.5)),
+            border: Border.all(color: c.withValues(alpha: 0.5)),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Column(
@@ -682,7 +699,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   icon: const Icon(Icons.remove_circle_outline, size: 20),
                   color: Colors.red,
                   padding: const EdgeInsets.all(2),
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
                 ),
                 Container(
                   width: 36,
@@ -700,7 +720,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   icon: const Icon(Icons.add_circle_outline, size: 20),
                   color: Colors.green,
                   padding: const EdgeInsets.all(2),
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
                 ),
               ],
             ),

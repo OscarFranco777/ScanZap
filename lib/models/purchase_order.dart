@@ -7,7 +7,10 @@ class PurchaseOrder {
   String costCenter; // Centro de costos
   String setWarehouse; // Almacén destino
   List<PurchaseOrderItem> items;
-  String status; // Borrador, Enviada, Cancelada
+  String status; // Borrador, Enviada, Cancelada (según docstatus local)
+  String erpStatus; // Estado REAL del ERP: Draft, To Receive and Bill, To Receive, To Bill, Completed, Closed, On Hold, Cancelled
+  double perBilled; // % facturado (lo calcula el ERP)
+  double perReceived; // % recibido (lo calcula el ERP)
   double grandTotal;
   DateTime createdAt;
   String namingSeries; // Serie de numeración (ej: PO-.YYYY.-)
@@ -21,6 +24,9 @@ class PurchaseOrder {
     this.setWarehouse = '',
     List<PurchaseOrderItem>? items,
     this.status = 'Borrador',
+    this.erpStatus = '',
+    this.perBilled = 0.0,
+    this.perReceived = 0.0,
     this.grandTotal = 0.0,
     DateTime? createdAt,
     this.namingSeries = '',
@@ -32,6 +38,23 @@ class PurchaseOrder {
 
   /// Cantidad total de items.
   int get totalQty => items.fold(0, (sum, item) => sum + item.qty);
+
+  // ─── Helpers de ciclo de vida (basados en el estado que devuelve el ERP) ───
+
+  bool get isDraft => erpStatus.isEmpty || erpStatus == 'Draft';
+  bool get isCancelled => erpStatus == 'Cancelled';
+
+  /// Puede recibir mercadería: enviada y no recibida al 100%.
+  bool get canReceive =>
+      id != null && !isDraft && !isCancelled && perReceived < 100;
+
+  /// Puede facturar: enviada y no facturada al 100%.
+  bool get canBill =>
+      id != null && !isDraft && !isCancelled && perBilled < 100;
+
+  /// Progreso para barras visuales (0.0 a 1.0).
+  double get receiveProgress => (perReceived / 100).clamp(0.0, 1.0);
+  double get billProgress => (perBilled / 100).clamp(0.0, 1.0);
 
   /// Convierte a Map para enviar a ERPNext.
   Map<String, dynamic> toMap() {
@@ -62,6 +85,10 @@ class PurchaseOrder {
       setWarehouse: data['set_warehouse'] ?? '',
       items: items,
       status: _statusFromDocstatus(data['docstatus']),
+      // Estado real del ERP — el servidor es la única fuente de verdad.
+      erpStatus: (data['status'] ?? '').toString(),
+      perBilled: (data['per_billed'] ?? 0).toDouble(),
+      perReceived: (data['per_received'] ?? 0).toDouble(),
       grandTotal: (data['grand_total'] ?? 0).toDouble(),
     );
   }

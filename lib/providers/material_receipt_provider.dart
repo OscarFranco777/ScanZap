@@ -146,7 +146,7 @@ class MaterialReceiptProvider with ChangeNotifier {
           itemCode: item['item_code'] ?? '',
           itemName: item['item_name'] ?? '',
           qty: (item['qty'] ?? 1).toInt(),
-          uom: item['uom'] ?? 'Unidad',
+          uom: item['uom'] ?? '',
           warehouse: warehouse.isNotEmpty ? warehouse : (item['warehouse'] ?? ''),
           purchaseOrderItem: item['name'] ?? '',
           priceListRate: (item['price_list_rate'] ?? 0).toDouble(),
@@ -430,6 +430,116 @@ class MaterialReceiptProvider with ChangeNotifier {
       isLoading = false;
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Factura un Purchase Receipt enviado desde el ERP (por el pendiente
+  /// de facturar). No usa currentReceipt — trabaja directo contra el ERP
+  /// para poder llamarse desde la lista sin abrir el detalle.
+  /// Retorna el estado real del receipt tras facturar (o null si falló).
+  Future<Map<String, dynamic>?> createInvoiceForReceipt(String receiptName) async {
+    isLoading = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      // Leer el estado real del receipt
+      final statusData = await erpNextService.refreshPurchaseReceiptStatus(receiptName);
+      final docstatus = statusData['docstatus'] ?? 0;
+      final erpStatus = (statusData['status'] ?? '').toString();
+      final perBilled = (statusData['per_billed'] is num)
+          ? (statusData['per_billed'] as num).toDouble()
+          : 0.0;
+
+      if (docstatus != 1) {
+        error = 'La recepción debe estar enviada antes de facturar';
+        isLoading = false;
+        notifyListeners();
+        return null;
+      }
+      if (erpStatus == 'Closed' || erpStatus == 'Cancelled') {
+        error = 'La recepción está ${erpStatus == 'Closed' ? "cerrada" : "cancelada"} — no se puede facturar';
+        isLoading = false;
+        notifyListeners();
+        return null;
+      }
+      if (perBilled >= 100) {
+        error = 'La recepción ya está facturada al 100%';
+        isLoading = false;
+        notifyListeners();
+        return null;
+      }
+
+      // Traer los items reales del ERP (tienen pr_detail y warehouse)
+      final prItems = await erpNextService.getPurchaseReceiptItems(receiptName);
+      if (prItems.isEmpty) {
+        error = 'La recepción no tiene items en el ERP';
+        isLoading = false;
+        notifyListeners();
+        return null;
+      }
+
+      final invItems = <Map<String, dynamic>>[];
+      for (final it in prItems) {
+        // Cantidad pendiente de facturar (qty - billed_qty si viene)
+        final qty = (it['qty'] ?? 0).toDouble();
+        final billedQty = (it['billed_qty'] != null)
+            ? (it['billed_qty'] as num).toDouble()
+            : 0.0;
+        final pending = qty - billedQty;
+        if (pending <= 0) continue; // item ya facturado
+        invItems.add({
+          'item_code': it['item_code'],
+          'qty': pending,
+          'rate': it['rate'] ?? 0,
+          'warehouse': it['warehouse'] ?? it['set_warehouse'] ?? '',
+          'name': it['name'], // pr_detail
+          'uom': it['uom'],
+        });
+      }
+
+      if (invItems.isEmpty) {
+        error = 'Todos los items de la recepción ya están facturados';
+        isLoading = false;
+        notifyListeners();
+        return null;
+      }
+
+      final supplier = (prItems.first['supplier'] ?? '').toString();
+      if (supplier.isEmpty) {
+        error = 'La recepción no tiene proveedor';
+        isLoading = false;
+        notifyListeners();
+        return null;
+      }
+
+      final invoice = await erpNextService.createPurchaseInvoiceFromReceipt(
+        purchaseReceipt: receiptName,
+        supplier: supplier,
+        items: invItems,
+        costCenter: (prItems.first['cost_center'] ?? '').toString(),
+        setWarehouse: (prItems.first['set_warehouse'] ?? '').toString(),
+      );
+
+      final invoiceName = invoice['name']?.toString() ?? '';
+      if (invoiceName.isEmpty) {
+        throw Exception('El ERP no devolvió el nombre de la factura');
+      }
+
+      // Submit de la factura: el ERP recalcula per_billed y status del receipt
+      await erpNextService.submitPurchaseInvoice(invoiceName);
+
+      // Refrescar el estado real del receipt desde el servidor
+      final fresh = await erpNextService.refreshPurchaseReceiptStatus(receiptName);
+
+      isLoading = false;
+      notifyListeners();
+      return fresh;
+    } catch (e) {
+      error = 'Error facturando recepción: $e';
+      isLoading = false;
+      notifyListeners();
+      return null;
     }
   }
 

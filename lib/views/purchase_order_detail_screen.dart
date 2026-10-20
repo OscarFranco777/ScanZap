@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -60,11 +61,18 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   MobileScannerController? _prCameraController;
   final _prScanController = TextEditingController();
   final _prQtyController = TextEditingController(text: '1');
-  bool _prScanLocked = false;
-  String _prLastScannedCode = '';
-  Timer? _prLockTimer;
   bool _prSaved = false;
   String _prSavedName = '';
+
+  // ─── Pila de escaneo del PR (procesa uno por uno, no pierde lecturas) ───
+  final Queue<String> _prScanQueue = Queue<String>();
+  bool _prDrainingQueue = false;
+
+  // ─── Controllers de precio de compra por item (key: item_code) ───
+  final Map<String, TextEditingController> _prRateControllers = {};
+
+  // ─── Facturación (Purchase Invoice desde PO) ───
+  final bool _invoiceLoading = false;
 
   // ─── Recepciones vinculadas a la PO ───
   List<Map<String, dynamic>> _linkedPRs = [];
@@ -84,6 +92,15 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       final poProvider = context.read<PurchaseOrderProvider>();
       poProvider.loadItemsCache(inventoryProvider.itemsByCode);
       poProvider.fetchCatalogs();
+
+      // Acceso directo desde la lista: abrir el formulario de recepción
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map && args['autoReceive'] == true) {
+        final order = poProvider.currentOrder;
+        if (order != null && order.id != null && order.canReceive) {
+          _openPRForm();
+        }
+      }
     });
   }
 
@@ -92,12 +109,14 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     _cameraController?.dispose();
     _prCameraController?.dispose();
     _lockTimer?.cancel();
-    _prLockTimer?.cancel();
     _supplierController.dispose();
     _scanController.dispose();
     _qtyController.dispose();
     _prScanController.dispose();
     _prQtyController.dispose();
+    for (final c in _prRateControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -272,7 +291,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Enviar', style: TextStyle(color: AppDesign.statusSubmitted)),
+            child: const Text(
+              'Enviar',
+              style: TextStyle(color: AppDesign.statusSubmitted),
+            ),
           ),
         ],
       ),
@@ -299,6 +321,74 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
           backgroundColor: AppDesign.statusCancelled,
         ),
       );
+    }
+  }
+
+  /// Crea y envía la factura de la orden (lo pendiente de facturar).
+  /// El ERP actualiza per_billed y el status de la orden solo.
+  Future<void> _facturarOrder() async {
+    final provider = context.read<PurchaseOrderProvider>();
+    final order = provider.currentOrder;
+    if (order == null || !order.canBill) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Facturar orden'),
+        content: Text(
+          'Se creará y enviará una factura de proveedor por el pendiente de facturar (${order.perBilled.toStringAsFixed(0)}% ya facturado).\n\n¿Continuar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Facturar',
+              style: TextStyle(color: AppDesign.statusSubmitted),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final ok = await provider.createInvoiceForOrder();
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? '✅ Factura creada — orden al ${provider.currentOrder?.perBilled.toStringAsFixed(0) ?? 100}% facturado'
+              : '❌ ${provider.error}',
+        ),
+        backgroundColor: ok
+            ? AppDesign.statusSubmitted
+            : AppDesign.statusCancelled,
+      ),
+    );
+  }
+
+  /// Color según el estado real del ERP.
+  Color _erpStatusColor(String status) {
+    switch (status) {
+      case 'Completed':
+        return AppDesign.statusSubmitted;
+      case 'To Receive':
+      case 'To Bill':
+        return AppDesign.blueIcon;
+      case 'Cancelled':
+      case 'Closed':
+        return AppDesign.statusCancelled;
+      case 'On Hold':
+        return AppDesign.orangeIcon;
+      default: // To Receive and Bill, Draft, etc.
+        return AppDesign.orangeIcon;
     }
   }
 
@@ -365,7 +455,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 'item_name': item['item_name'] ?? '',
                 'qty': item['qty'] ?? 0,
                 'received_qty': item['received_qty'] ?? 0,
-                'uom': item['uom'] ?? 'Unidad',
+                'uom': item['uom'] ?? '',
                 'rate': item['rate'] ?? 0,
                 'purchase_order_item': item['name'] ?? '',
               },
@@ -385,17 +475,33 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   }
 
   void _onPRBarcodeDetected(BarcodeCapture capture) {
-    if (_prScanLocked) return;
     final barcode = capture.barcodes.firstOrNull;
     if (barcode == null || barcode.rawValue == null) return;
 
     final code = barcode.rawValue!.trim();
-    if (code.isEmpty || code == _prLastScannedCode) return;
+    if (code.isEmpty) return;
 
-    _prScanLocked = true;
-    _prLastScannedCode = code;
-    _prCameraController?.stop();
-    _processPRScan(code);
+    // Modo pila: encolar y procesar uno por uno (no bloquea nuevas lecturas)
+    _prScanQueue.add(code);
+    _drainPRScanQueue();
+  }
+
+  /// Procesa la pila de escaneos del PR uno por uno, con pausa anti-doble-lectura.
+  Future<void> _drainPRScanQueue() async {
+    if (_prDrainingQueue) return;
+    _prDrainingQueue = true;
+    if (mounted) setState(() {}); // refresca badge "Pila: N en cola"
+
+    while (_prScanQueue.isNotEmpty) {
+      final code = _prScanQueue.removeFirst();
+      if (!mounted) break;
+      _processPRScan(code);
+      // Pausa corta para evitar doble-lectura del mismo código
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    _prDrainingQueue = false;
+    if (mounted) setState(() {});
   }
 
   void _processPRScan(String code) {
@@ -418,7 +524,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
         'item_name': cleanCode,
         'qty': qty,
         'received_qty': 0,
-        'uom': 'Unidad',
+        'uom': '',
         'rate': 0,
         'purchase_order_item': '',
       });
@@ -427,15 +533,6 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     _prQtyController.text = '1';
     _prScanController.clear();
     setState(() {});
-
-    _prLockTimer?.cancel();
-    _prLockTimer = Timer(const Duration(seconds: 2), () {
-      _prScanLocked = false;
-      _prLastScannedCode = '';
-      if (_prScannerActive && mounted) {
-        _prCameraController?.start();
-      }
-    });
   }
 
   Future<void> _savePR() async {
@@ -480,6 +577,30 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       _prSavedName = result['name'] ?? _prSavedName;
       _prSaved = true;
 
+      // Refrescar los items desde el ERP para traer el precio de compra
+      // real que registró el servidor (el usuario puede ajustarlo y
+      // volver a guardar con "Actualizar").
+      try {
+        final saved = await service.getPurchaseReceipt(_prSavedName);
+        if (saved != null && saved['items'] != null) {
+          _prItems = (saved['items'] as List)
+              .map((it) => {
+                    'item_code': it['item_code'] ?? '',
+                    'item_name': it['item_name'] ?? '',
+                    'qty': it['qty'] ?? 0,
+                    'received_qty': it['received_qty'] ?? 0,
+                    'uom': it['uom'] ?? '',
+                    'rate': it['rate'] ?? 0,
+                    'purchase_order_item': it['purchase_order_item'] ?? '',
+                    'warehouse': it['warehouse'] ?? '',
+                  })
+              .toList();
+          _syncPRRateControllers();
+        }
+      } catch (_) {
+        // Si falla el refresh seguimos con los items locales
+      }
+
       // Notificar al provider de recepciones para que refresque su lista
       if (mounted) {
         context.read<MaterialReceiptProvider>().fetchReceipts();
@@ -518,7 +639,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Enviar', style: TextStyle(color: AppDesign.statusSubmitted)),
+            child: const Text(
+              'Enviar',
+              style: TextStyle(color: AppDesign.statusSubmitted),
+            ),
           ),
         ],
       ),
@@ -540,8 +664,14 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
         await showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            icon: const Icon(Icons.check_circle, color: AppDesign.statusSubmitted, size: 48),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            icon: const Icon(
+              Icons.check_circle,
+              color: AppDesign.statusSubmitted,
+              size: 48,
+            ),
             title: const Text('Recepción Enviada'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -572,6 +702,8 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   });
                   _linkedPRsLoaded = false;
                   _loadLinkedPRs();
+                  // Refrescar estado de la orden (per_received cambió en el ERP)
+                  context.read<PurchaseOrderProvider>().refreshOrder();
                 },
                 child: const Text('Volver a PO'),
               ),
@@ -586,6 +718,8 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   });
                   _linkedPRsLoaded = false;
                   _loadLinkedPRs();
+                  // Refrescar estado de la orden (per_received cambió en el ERP)
+                  context.read<PurchaseOrderProvider>().refreshOrder();
                   final service = context.read<ErpNextService>();
                   Navigator.push(
                     context,
@@ -679,13 +813,22 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             title: order?.id != null ? '📦 ${order!.id}' : '🛒 Nueva Orden',
             icon: order?.id != null ? Icons.receipt_long : Icons.shopping_cart,
             subtitle: order?.id != null
-                ? (provider.isSubmitted ? 'Orden enviada' : 'Editando borrador')
+                ? (provider.isSubmitted
+                      ? (order!.erpStatus.isNotEmpty
+                            ? order.erpStatus
+                            : 'Orden enviada')
+                      : 'Editando borrador')
                 : 'Crear nueva orden de compra',
             showBack: true,
             onBack: () => Navigator.pop(context),
             actions: [
               if (provider.isSubmitted)
-                AppDesign.statusBadge('Enviada', AppDesign.statusSubmitted),
+                AppDesign.statusBadge(
+                  order?.erpStatus.isNotEmpty == true
+                      ? order!.erpStatus
+                      : 'Enviada',
+                  _erpStatusColor(order?.erpStatus ?? ''),
+                ),
               if (order?.id != null && !provider.isSubmitted)
                 GestureDetector(
                   onTap: () => provider.refreshOrder(),
@@ -696,7 +839,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                       color: Colors.white.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.refresh, color: Colors.white, size: 18),
+                    child: const Icon(
+                      Icons.refresh,
+                      color: Colors.white,
+                      size: 18,
+                    ),
                   ),
                 ),
               const SizedBox(width: 8),
@@ -754,10 +901,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 const SizedBox(height: 4),
                 Text(
                   'Completá los datos para generar la orden',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[500],
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                 ),
               ],
             ),
@@ -799,9 +943,21 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 label: 'Serie de Numeración *',
                 icon: Icons.tag,
                 hint: 'Seleccionar serie',
-                items: series.map((s) => DropdownMenuItem(value: s, child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
+                items: series
+                    .map(
+                      (s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(
+                          s,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
                 value: currentVal,
-                onChanged: (val) => setState(() => _selectedNamingSeries = val ?? ''),
+                onChanged: (val) =>
+                    setState(() => _selectedNamingSeries = val ?? ''),
               );
             },
           ),
@@ -830,7 +986,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   decoration: InputDecoration(
                     labelText: 'Proveedor *',
                     hintText: 'Escribí el nombre del proveedor',
-                    prefixIcon: const Icon(Icons.business, color: AppDesign.navy),
+                    prefixIcon: const Icon(
+                      Icons.business,
+                      color: AppDesign.navy,
+                    ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
@@ -838,7 +997,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     filled: true,
                     fillColor: AppDesign.cardWhite,
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                   ),
                   onChanged: _searchSuppliers,
                 ),
@@ -855,6 +1017,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         final s = _supplierSuggestions[index];
                         return ListTile(
                           dense: true,
+                          tileColor: Colors.transparent,
+                          hoverColor: Colors.grey[200],
+                          focusColor: Colors.grey[300],
                           leading: AppDesign.circleAvatar(
                             icon: Icons.business,
                             bgColor: AppDesign.blueLight,
@@ -865,11 +1030,17 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                             s['supplier_name'] ?? s['name'] ?? '',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                           subtitle: Text(
                             s['name'] ?? '',
-                            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[500],
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -910,7 +1081,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               child: InputDecorator(
                 decoration: InputDecoration(
                   labelText: 'Fecha de Entrega *',
-                  prefixIcon: const Icon(Icons.calendar_today, color: AppDesign.navy),
+                  prefixIcon: const Icon(
+                    Icons.calendar_today,
+                    color: AppDesign.navy,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
@@ -918,7 +1092,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   filled: true,
                   fillColor: AppDesign.cardWhite,
                   isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
                 ),
                 child: Text(
                   DateFormat('dd/MM/yyyy').format(_selectedDate),
@@ -944,10 +1121,20 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 items: warehouses.map<DropdownMenuItem<String>>((w) {
                   final name = (w['name'] ?? '').toString();
                   final displayName = (w['warehouse_name'] ?? name).toString();
-                  return DropdownMenuItem<String>(value: name, child: Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis));
+                  return DropdownMenuItem<String>(
+                    value: name,
+                    child: Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
                 }).toList(),
-                value: _selectedWarehouse.isNotEmpty ? _selectedWarehouse : null,
-                onChanged: (val) => setState(() => _selectedWarehouse = val ?? ''),
+                value: _selectedWarehouse.isNotEmpty
+                    ? _selectedWarehouse
+                    : null,
+                onChanged: (val) =>
+                    setState(() => _selectedWarehouse = val ?? ''),
               );
             },
           ),
@@ -967,11 +1154,22 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 hint: !loaded ? 'Cargando...' : 'Seleccionar centro',
                 items: centers.map<DropdownMenuItem<String>>((c) {
                   final name = (c['name'] ?? '').toString();
-                  final displayName = (c['cost_center_name'] ?? name).toString();
-                  return DropdownMenuItem<String>(value: name, child: Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis));
+                  final displayName = (c['cost_center_name'] ?? name)
+                      .toString();
+                  return DropdownMenuItem<String>(
+                    value: name,
+                    child: Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
                 }).toList(),
-                value: _selectedCostCenter.isNotEmpty ? _selectedCostCenter : null,
-                onChanged: (val) => setState(() => _selectedCostCenter = val ?? ''),
+                value: _selectedCostCenter.isNotEmpty
+                    ? _selectedCostCenter
+                    : null,
+                onChanged: (val) =>
+                    setState(() => _selectedCostCenter = val ?? ''),
               );
             },
           ),
@@ -1052,7 +1250,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
           filled: true,
           fillColor: enabled ? AppDesign.cardWhite : Colors.grey[100],
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 10,
+          ),
         ),
         initialValue: value,
         hint: Text(
@@ -1061,7 +1262,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        icon: Icon(Icons.arrow_drop_down, size: 22, color: enabled ? AppDesign.navy : Colors.grey),
+        icon: Icon(
+          Icons.arrow_drop_down,
+          size: 22,
+          color: enabled ? AppDesign.navy : Colors.grey,
+        ),
         items: items,
         onChanged: enabled ? onChanged : null,
       ),
@@ -1109,7 +1314,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   child: Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: _scanLocked ? AppDesign.orangeIcon : AppDesign.accent,
+                        color: _scanLocked
+                            ? AppDesign.orangeIcon
+                            : AppDesign.accent,
                         width: 2.5,
                       ),
                     ),
@@ -1117,13 +1324,22 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                       alignment: Alignment.topCenter,
                       child: Container(
                         margin: const EdgeInsets.only(top: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 5,
+                        ),
                         decoration: BoxDecoration(
-                          color: (_scanLocked ? AppDesign.orangeIcon : AppDesign.accent).withValues(alpha: 0.9),
+                          color:
+                              (_scanLocked
+                                      ? AppDesign.orangeIcon
+                                      : AppDesign.accent)
+                                  .withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
-                          _scanLocked ? '⏳ Esperá...' : '📷 Escaneá un producto',
+                          _scanLocked
+                              ? '⏳ Esperá...'
+                              : '📷 Escaneá un producto',
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -1195,7 +1411,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         controller: _qtyController,
                         keyboardType: TextInputType.number,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                         decoration: InputDecoration(
                           labelText: 'Cant.',
                           border: OutlineInputBorder(
@@ -1205,7 +1424,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                           filled: true,
                           fillColor: AppDesign.bg,
                           isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 10,
+                          ),
                         ),
                       ),
                     ),
@@ -1218,7 +1440,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         decoration: InputDecoration(
                           labelText: 'Código',
                           hintText: 'Escanear o escribir...',
-                          prefixIcon: Icon(Icons.qr_code_scanner, size: 18, color: AppDesign.accent),
+                          prefixIcon: Icon(
+                            Icons.qr_code_scanner,
+                            size: 18,
+                            color: AppDesign.accent,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
                             borderSide: BorderSide(color: Colors.grey[200]!),
@@ -1226,7 +1452,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                           filled: true,
                           fillColor: AppDesign.bg,
                           isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 8,
+                          ),
                         ),
                         onSubmitted: (v) {
                           if (v.trim().isNotEmpty) _processScan(v);
@@ -1335,7 +1564,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: AppDesign.orangeLight,
                   borderRadius: BorderRadius.circular(10),
@@ -1364,7 +1596,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   subtitle: 'Usá la cámara o escribí el código',
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 4,
+                  ),
                   itemCount: order.items.length,
                   itemBuilder: (context, index) {
                     return _buildItemCard(order.items[index], index);
@@ -1396,13 +1631,18 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                             : const Icon(Icons.save, size: 18),
                         label: Text(
                           provider.isSaved ? 'Actualizar' : 'Guardar',
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppDesign.blueIcon,
                           foregroundColor: Colors.white,
                           elevation: 3,
-                          shadowColor: AppDesign.blueIcon.withValues(alpha: 0.4),
+                          shadowColor: AppDesign.blueIcon.withValues(
+                            alpha: 0.4,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -1421,7 +1661,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         icon: const Icon(Icons.send, size: 18),
                         label: const Text(
                           'Enviar',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: provider.isSaved
@@ -1429,7 +1672,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                               : Colors.grey[400],
                           foregroundColor: Colors.white,
                           elevation: provider.isSaved ? 3 : 0,
-                          shadowColor: AppDesign.statusSubmitted.withValues(alpha: 0.4),
+                          shadowColor: AppDesign.statusSubmitted.withValues(
+                            alpha: 0.4,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -1439,6 +1684,60 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   ),
                 ],
               ),
+            ),
+          ),
+
+        // ─── ESTADO REAL DEL ERP ───
+        if (provider.isSubmitted)
+          Container(
+            margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppDesign.cardWhite,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppDesign.navy.withValues(alpha: 0.06),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    AppDesign.statusBadge(
+                      order.erpStatus.isNotEmpty ? order.erpStatus : 'Enviada',
+                      _erpStatusColor(order.erpStatus),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => provider.refreshOrder(),
+                      child: Icon(
+                        Icons.refresh,
+                        size: 18,
+                        color: Colors.grey[500],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                _buildProgressBar(
+                  'Recibido',
+                  order.perReceived,
+                  order.receiveProgress,
+                  AppDesign.tealIcon,
+                ),
+                const SizedBox(height: 8),
+                _buildProgressBar(
+                  'Facturado',
+                  order.perBilled,
+                  order.billProgress,
+                  AppDesign.blueIcon,
+                ),
+              ],
             ),
           ),
 
@@ -1483,7 +1782,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                       const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppDesign.accent),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppDesign.accent,
+                        ),
                       ),
                   ],
                 ),
@@ -1527,7 +1829,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         decoration: BoxDecoration(
                           color: statusColor.withValues(alpha: 0.06),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: statusColor.withValues(alpha: 0.15)),
+                          border: Border.all(
+                            color: statusColor.withValues(alpha: 0.15),
+                          ),
                         ),
                         child: Row(
                           children: [
@@ -1553,14 +1857,21 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                                   ),
                                   Text(
                                     '${pr['posting_date'] ?? ''} — Bs. ${pr['grand_total'] ?? 0}',
-                                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[500],
+                                    ),
                                   ),
                                 ],
                               ),
                             ),
                             AppDesign.statusBadge(statusText, statusColor),
                             const SizedBox(width: 6),
-                            Icon(Icons.chevron_right, color: Colors.grey[400], size: 18),
+                            Icon(
+                              Icons.chevron_right,
+                              color: Colors.grey[400],
+                              size: 18,
+                            ),
                           ],
                         ),
                       ),
@@ -1570,43 +1881,137 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             ),
           ),
 
-        // ─── BOTÓN CREAR RECEPCIÓN ───
+        // ─── BOTONES RECIBIR / FACTURAR ───
         if (provider.isSubmitted)
           SafeArea(
             child: Container(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-              child: SizedBox(
-                height: 52,
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _prLoading ? null : _openPRForm,
-                  icon: _prLoading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+              child: Row(
+                children: [
+                  if (order.canReceive)
+                    Expanded(
+                      child: SizedBox(
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          onPressed: _prLoading ? null : _openPRForm,
+                          icon: _prLoading
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.local_shipping, size: 20),
+                          label: const Text(
+                            'Recibir',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        )
-                      : const Icon(Icons.local_shipping, size: 20),
-                  label: const Text(
-                    'Crear Recepción de Mercadería',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppDesign.tealIcon,
-                    foregroundColor: Colors.white,
-                    elevation: 4,
-                    shadowColor: AppDesign.tealIcon.withValues(alpha: 0.4),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppDesign.tealIcon,
+                            foregroundColor: Colors.white,
+                            elevation: 4,
+                            shadowColor: AppDesign.tealIcon.withValues(
+                              alpha: 0.4,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
+                  if (order.canReceive && order.canBill)
+                    const SizedBox(width: 10),
+                  if (order.canBill)
+                    Expanded(
+                      child: SizedBox(
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          onPressed: _invoiceLoading ? null : _facturarOrder,
+                          icon: _invoiceLoading
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.receipt, size: 20),
+                          label: const Text(
+                            'Facturar',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppDesign.blueIcon,
+                            foregroundColor: Colors.white,
+                            elevation: 4,
+                            shadowColor: AppDesign.blueIcon.withValues(
+                              alpha: 0.4,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
+      ],
+    );
+  }
+
+  /// Barra de progreso para recibido/facturado.
+  Widget _buildProgressBar(
+    String label,
+    double percent,
+    double progress,
+    Color color,
+  ) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 70,
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+        ),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 8,
+              backgroundColor: Colors.grey[200],
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 42,
+          child: Text(
+            '${percent.toStringAsFixed(0)}%',
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1652,10 +2057,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 const SizedBox(height: 4),
                 Text(
                   'PO: ${order.id ?? ""}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[500],
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                 ),
               ],
             ),
@@ -1690,10 +2092,16 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               icon: Icons.tag,
               hint: 'Seleccionar serie',
               items: _prNamingSeriesOptions
-                  .map((s) => DropdownMenuItem(
-                        value: s,
-                        child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      ))
+                  .map(
+                    (s) => DropdownMenuItem(
+                      value: s,
+                      child: Text(
+                        s,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  )
                   .toList(),
               value: _prNamingSeriesOptions.contains(_prNamingSeries)
                   ? _prNamingSeries
@@ -1724,7 +2132,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 filled: true,
                 fillColor: Colors.grey[50],
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
               ),
             ),
           ),
@@ -1752,7 +2163,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               child: InputDecorator(
                 decoration: InputDecoration(
                   labelText: 'Fecha de Entrega *',
-                  prefixIcon: const Icon(Icons.calendar_today, color: AppDesign.navy),
+                  prefixIcon: const Icon(
+                    Icons.calendar_today,
+                    color: AppDesign.navy,
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
@@ -1760,7 +2174,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   filled: true,
                   fillColor: AppDesign.cardWhite,
                   isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
                 ),
                 child: Text(
                   DateFormat('dd/MM/yyyy').format(_prDate),
@@ -1793,7 +2210,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 filled: true,
                 fillColor: Colors.grey[50],
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
               ),
             ),
           ),
@@ -1813,7 +2233,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               readOnly: true,
               decoration: InputDecoration(
                 labelText: 'Centro de Costos',
-                prefixIcon: const Icon(Icons.account_balance, color: AppDesign.navy),
+                prefixIcon: const Icon(
+                  Icons.account_balance,
+                  color: AppDesign.navy,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -1821,7 +2244,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 filled: true,
                 fillColor: Colors.grey[50],
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
               ),
             ),
           ),
@@ -1838,7 +2264,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               ),
               child: Text(
                 _prError,
-                style: const TextStyle(color: AppDesign.statusCancelled, fontSize: 12),
+                style: const TextStyle(
+                  color: AppDesign.statusCancelled,
+                  fontSize: 12,
+                ),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -1855,7 +2284,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.arrow_forward, size: 20),
               label: const Text(
@@ -1897,7 +2329,92 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   }
 
   /// Formulario inline de creación de Purchase Receipt — estilo AppDesign.
+  /// Controller del campo precio de compra de un item del PR (por item_code).
+  TextEditingController _getPRRateController(String itemCode, double rate) {
+    if (!_prRateControllers.containsKey(itemCode)) {
+      _prRateControllers[itemCode] = TextEditingController(
+        text: rate > 0 ? _fmtRate(rate) : '',
+      );
+    }
+    return _prRateControllers[itemCode]!;
+  }
+
+  String _fmtRate(num v) {
+    final d = v.toDouble();
+    return d == d.roundToDouble() ? d.toStringAsFixed(0) : d.toString();
+  }
+
+  /// Sincroniza los controllers de precio con los valores reales del ERP.
+  void _syncPRRateControllers() {
+    for (final item in _prItems) {
+      final code = (item['item_code'] ?? '').toString();
+      if (code.isEmpty) continue;
+      final rate = (item['rate'] as num?)?.toDouble() ?? 0.0;
+      if (_prRateControllers.containsKey(code)) {
+        _prRateControllers[code]!.text = rate > 0 ? _fmtRate(rate) : '';
+      }
+    }
+  }
+
+  /// Campo editable del precio de compra de un item del PR.
+  /// Antes de guardar muestra el rate de la PO; después de guardar,
+  /// el precio real que registró el ERP (refrescado en _savePR).
+  Widget _buildPRRateField(Map<String, dynamic> item, int index) {
+    final currency = context.read<InventoryProvider>().companyCurrency.isNotEmpty
+        ? context.read<InventoryProvider>().companyCurrency
+        : "\$";
+    final itemCode = (item['item_code'] ?? '').toString();
+    final rate = (item['rate'] as num?)?.toDouble() ?? 0.0;
+
+    return Row(
+      children: [
+        Text(
+          'Precio',
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            color: Colors.grey[600],
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: TextField(
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'Precio de compra',
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 5,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              filled: true,
+              fillColor: Colors.white,
+              prefixText: '$currency ',
+              prefixStyle: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            ),
+            controller: _getPRRateController(itemCode, rate),
+            onChanged: (val) {
+              final parsed = double.tryParse(val.replaceAll(',', '.')) ?? 0.0;
+              if (index < _prItems.length) {
+                _prItems[index]['rate'] = parsed;
+              }
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildPRForm(PurchaseOrder order) {
+    // Con el teclado abierto escondemos cámara y controles: están tapados
+    // por el teclado y su altura fija desborda la pantalla (BOTTOM OVERFLOWED).
+    final kbOpen = MediaQuery.of(context).viewInsets.bottom > 0;
     return Column(
       children: [
         // ─── HEADER PR ───
@@ -1912,13 +2429,19 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: (_prSaved ? AppDesign.statusSubmitted : AppDesign.tealIcon).withValues(alpha: 0.15),
+                  color:
+                      (_prSaved
+                              ? AppDesign.statusSubmitted
+                              : AppDesign.tealIcon)
+                          .withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   _prSaved ? Icons.check_circle : Icons.local_shipping,
                   size: 16,
-                  color: _prSaved ? AppDesign.statusSubmitted : AppDesign.tealIcon,
+                  color: _prSaved
+                      ? AppDesign.statusSubmitted
+                      : AppDesign.tealIcon,
                 ),
               ),
               const SizedBox(width: 10),
@@ -1927,11 +2450,15 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _prSaved ? 'Borrador Guardado' : 'Nueva Recepción de Mercadería',
+                      _prSaved
+                          ? 'Borrador Guardado'
+                          : 'Nueva Recepción de Mercadería',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
-                        color: _prSaved ? AppDesign.statusSubmitted : AppDesign.tealIcon,
+                        color: _prSaved
+                            ? AppDesign.statusSubmitted
+                            : AppDesign.tealIcon,
                       ),
                     ),
                     if (_prSaved && _prSavedName.isNotEmpty)
@@ -1952,7 +2479,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
         ),
 
         // ─── SCANNER ───
-        if (_prScannerActive)
+        if (_prScannerActive && !kbOpen)
           SizedBox(
             height: 150,
             child: Stack(
@@ -1980,7 +2507,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         color: Colors.black54,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.close, size: 16, color: Colors.white),
+                      child: const Icon(
+                        Icons.close,
+                        size: 16,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),
@@ -1988,13 +2519,18 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   top: 4,
                   left: 4,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: AppDesign.tealIcon.withValues(alpha: 0.9),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Text(
-                      _prScanLocked ? '⏳ Esperá...' : '📷 Escaneá producto',
+                      _prDrainingQueue
+                          ? '📦 Pila: ${_prScanQueue.length + 1} en cola...'
+                          : '📷 Escaneá producto',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -2008,6 +2544,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
           ),
 
         // ─── CONTROLES PR ───
+        if (!kbOpen)
         Container(
           margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
           padding: const EdgeInsets.all(10),
@@ -2045,7 +2582,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: _prScannerActive ? AppDesign.orangeIcon : AppDesign.tealIcon,
+                    color: _prScannerActive
+                        ? AppDesign.orangeIcon
+                        : AppDesign.tealIcon,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
@@ -2062,7 +2601,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   controller: _prQtyController,
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
                   decoration: InputDecoration(
                     labelText: 'Cant.',
                     border: OutlineInputBorder(
@@ -2072,7 +2614,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     filled: true,
                     fillColor: AppDesign.bg,
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 8,
+                    ),
                   ),
                 ),
               ),
@@ -2091,10 +2636,16 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     filled: true,
                     fillColor: AppDesign.bg,
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 8,
+                    ),
                   ),
                   onSubmitted: (v) {
-                    if (v.trim().isNotEmpty) _processPRScan(v);
+                    if (v.trim().isNotEmpty) {
+                      _prScanQueue.add(v.trim());
+                      _drainPRScanQueue();
+                    }
                   },
                 ),
               ),
@@ -2114,11 +2665,15 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             children: [
               Icon(Icons.info_outline, size: 14, color: Colors.grey[500]),
               const SizedBox(width: 4),
-              Text(
-                'PO: ${order.id ?? ""} — ${order.supplier}',
-                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              Expanded(
+                child: Text(
+                  'PO: ${order.id ?? ""} — ${order.supplier}',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
@@ -2183,7 +2738,8 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  (item['item_name'] ?? item['item_code'] ?? '').toString(),
+                                  (item['item_name'] ?? item['item_code'] ?? '')
+                                      .toString(),
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
@@ -2195,8 +2751,15 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                                 const SizedBox(height: 2),
                                 Text(
                                   '${item["item_code"]} — Ped: ${item["qty"]} — Pend: $pending',
-                                  style: TextStyle(color: Colors.grey[500], fontSize: 11),
+                                  style: TextStyle(
+                                    color: Colors.grey[500],
+                                    fontSize: 11,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
+                                const SizedBox(height: 6),
+                                _buildPRRateField(item, index),
                               ],
                             ),
                           ),
@@ -2205,21 +2768,30 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                             children: [
                               GestureDetector(
                                 onTap: () {
-                                  final newQty = (_prItems[index]['qty'] ?? 0) - 1;
+                                  final newQty =
+                                      (_prItems[index]['qty'] ?? 0) - 1;
                                   if (newQty <= 0) {
                                     setState(() => _prItems.removeAt(index));
                                   } else {
-                                    setState(() => _prItems[index]['qty'] = newQty);
+                                    setState(
+                                      () => _prItems[index]['qty'] = newQty,
+                                    );
                                   }
                                 },
                                 child: Container(
                                   width: 28,
                                   height: 28,
                                   decoration: BoxDecoration(
-                                    color: AppDesign.statusCancelled.withValues(alpha: 0.1),
+                                    color: AppDesign.statusCancelled.withValues(
+                                      alpha: 0.1,
+                                    ),
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const Icon(Icons.remove, size: 16, color: AppDesign.statusCancelled),
+                                  child: const Icon(
+                                    Icons.remove,
+                                    size: 16,
+                                    color: AppDesign.statusCancelled,
+                                  ),
                                 ),
                               ),
                               Container(
@@ -2237,17 +2809,24 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                               GestureDetector(
                                 onTap: () {
                                   setState(
-                                    () => _prItems[index]['qty'] = (_prItems[index]['qty'] ?? 0) + 1,
+                                    () => _prItems[index]['qty'] =
+                                        (_prItems[index]['qty'] ?? 0) + 1,
                                   );
                                 },
                                 child: Container(
                                   width: 28,
                                   height: 28,
                                   decoration: BoxDecoration(
-                                    color: AppDesign.statusSubmitted.withValues(alpha: 0.1),
+                                    color: AppDesign.statusSubmitted.withValues(
+                                      alpha: 0.1,
+                                    ),
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const Icon(Icons.add, size: 16, color: AppDesign.statusSubmitted),
+                                  child: const Icon(
+                                    Icons.add,
+                                    size: 16,
+                                    color: AppDesign.statusSubmitted,
+                                  ),
                                 ),
                               ),
                             ],
@@ -2271,7 +2850,10 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             ),
             child: Text(
               _prError,
-              style: const TextStyle(color: AppDesign.statusCancelled, fontSize: 12),
+              style: const TextStyle(
+                color: AppDesign.statusCancelled,
+                fontSize: 12,
+              ),
               textAlign: TextAlign.center,
             ),
           ),
@@ -2286,23 +2868,33 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                   child: SizedBox(
                     height: 48,
                     child: ElevatedButton.icon(
-                      onPressed: _prLoading || _prItems.isEmpty ? null : _savePR,
+                      onPressed: _prLoading || _prItems.isEmpty
+                          ? null
+                          : _savePR,
                       icon: _prLoading
                           ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : const Icon(Icons.save, size: 18),
                       label: Text(
                         _prSaved ? 'Actualizar' : 'Guardar',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppDesign.blueIcon,
                         foregroundColor: Colors.white,
                         elevation: 3,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
                   ),
@@ -2316,13 +2908,20 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                       icon: const Icon(Icons.send, size: 18),
                       label: const Text(
                         'Enviar',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _prSaved ? AppDesign.statusSubmitted : Colors.grey[400],
+                        backgroundColor: _prSaved
+                            ? AppDesign.statusSubmitted
+                            : Colors.grey[400],
                         foregroundColor: Colors.white,
                         elevation: _prSaved ? 3 : 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
                   ),
@@ -2402,7 +3001,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                       color: AppDesign.statusCancelled.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.remove, size: 16, color: AppDesign.statusCancelled),
+                    child: const Icon(
+                      Icons.remove,
+                      size: 16,
+                      color: AppDesign.statusCancelled,
+                    ),
                   ),
                 ),
                 Container(
@@ -2426,7 +3029,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                       color: AppDesign.statusSubmitted.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.add, size: 16, color: AppDesign.statusSubmitted),
+                    child: const Icon(
+                      Icons.add,
+                      size: 16,
+                      color: AppDesign.statusSubmitted,
+                    ),
                   ),
                 ),
               ],

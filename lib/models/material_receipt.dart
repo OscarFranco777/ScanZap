@@ -8,7 +8,9 @@ class MaterialReceipt {
   String namingSeries;
   String costCenter;
   List<MaterialReceiptItem> items;
-  String status; // Borrador, Enviada, Cancelada
+  String status; // Borrador, Enviada, Cancelada (por docstatus, lógica interna)
+  String erpStatus; // Estado REAL del ERP (To Bill, Partly Billed, Completed...)
+  double perBilled; // % facturado según el ERP
   double totalAmount;
   DateTime postingDate;
   DateTime createdAt;
@@ -23,6 +25,8 @@ class MaterialReceipt {
     this.costCenter = '',
     List<MaterialReceiptItem>? items,
     this.status = 'Borrador',
+    this.erpStatus = '',
+    this.perBilled = 0.0,
     this.totalAmount = 0.0,
     DateTime? postingDate,
     DateTime? createdAt,
@@ -78,6 +82,8 @@ class MaterialReceipt {
       costCenter: data['cost_center'] ?? '',
       items: items,
       status: _statusFromDocstatus(data['docstatus']),
+      erpStatus: (data['status'] ?? '').toString(),
+      perBilled: (data['per_billed'] is num) ? (data['per_billed'] as num).toDouble() : 0.0,
       totalAmount: (total is num) ? total.toDouble() : 0.0,
       postingDate: DateTime.tryParse(data['posting_date'] ?? '') ?? DateTime.now(),
     );
@@ -106,7 +112,7 @@ class MaterialReceiptItem {
     required this.itemCode,
     this.itemName = '',
     this.qty = 1,
-    this.uom = 'Unidad',
+    this.uom = '',
     this.warehouse = '',
     this.purchaseOrderItem = '',
     this.priceListRate = 0.0,
@@ -118,7 +124,10 @@ class MaterialReceiptItem {
       'item_code': itemCode,
       'qty': qty,
       'warehouse': warehouse,
-      'uom': uom,
+      // La UOM solo se manda si es real; 'Unidad' es placeholder y no
+      // existe en el ERP (la real es 'Unidad(es)'). Sin UOM el ERP
+      // rellena stock_uom del item solo.
+      if (uom.isNotEmpty && uom != 'Unidad') 'uom': uom,
       if (purchaseOrder.isNotEmpty) 'purchase_order': purchaseOrder,
       if (purchaseOrderItem.isNotEmpty)
         'purchase_order_item': purchaseOrderItem,
@@ -132,7 +141,7 @@ class MaterialReceiptItem {
       itemCode: data['item_code'] ?? '',
       itemName: data['item_name'] ?? '',
       qty: (data['qty'] ?? 0).toInt(),
-      uom: data['uom'] ?? 'Unidad',
+      uom: data['uom'] ?? '',
       warehouse: data['warehouse'] ?? '',
       purchaseOrderItem: data['purchase_order_item'] ?? '',
       priceListRate: (data['price_list_rate'] ?? 0).toDouble(),

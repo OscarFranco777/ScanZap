@@ -117,7 +117,7 @@ class PurchaseOrderProvider with ChangeNotifier {
         currentOrder = PurchaseOrder.fromErp(data);
         // Si ya tiene ID, está guardada; si docstatus=1, está enviada
         isSaved = currentOrder!.id != null;
-        isSubmitted = currentOrder!.status == 'Enviada';
+        isSubmitted = (data['docstatus'] ?? 0) == 1;
       } else {
         error = 'Orden no encontrada';
       }
@@ -318,6 +318,18 @@ class PurchaseOrderProvider with ChangeNotifier {
     try {
       await erpNextService.submitPurchaseOrder(currentOrder!.id!);
 
+      // El estado lo asigna el ERP tras el submit (normalmente "To Receive and Bill").
+      // Lo leemos del servidor en vez de asumirlo.
+      try {
+        final statusData = await erpNextService.refreshPurchaseOrderStatus(
+          currentOrder!.id!,
+        );
+        currentOrder!.erpStatus = (statusData['status'] ?? '').toString();
+        currentOrder!.perBilled = (statusData['per_billed'] ?? 0).toDouble();
+        currentOrder!.perReceived = (statusData['per_received'] ?? 0).toDouble();
+      } catch (_) {
+        currentOrder!.erpStatus = 'To Receive and Bill';
+      }
       currentOrder!.status = 'Enviada';
       isSubmitted = true;
 
@@ -326,6 +338,137 @@ class PurchaseOrderProvider with ChangeNotifier {
       return true;
     } catch (e) {
       error = 'Error enviando orden: $e';
+      isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Cancela la orden enviada (docstatus 1 → 2). El ERP exige que no tenga
+  /// recibos/facturas enviadas contra ella para permitir la cancelación.
+  Future<bool> cancelOrder() async {
+    if (currentOrder == null || currentOrder!.id == null) {
+      error = 'No hay orden guardada para cancelar';
+      notifyListeners();
+      return false;
+    }
+
+    if (!isSubmitted) {
+      error = 'Solo se puede cancelar una orden enviada';
+      notifyListeners();
+      return false;
+    }
+
+    isLoading = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      await erpNextService.cancelPurchaseOrder(currentOrder!.id!);
+      currentOrder!.status = 'Cancelada';
+      currentOrder!.erpStatus = 'Cancelled';
+      isSubmitted = false;
+
+      isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      error = 'Error cancelando orden: $e';
+      isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Crea y envía un Purchase Invoice contra la orden actual.
+  /// Requiere orden enviada y no facturada al 100%.
+  /// Al submitir la factura, el ERP actualiza per_billed y el status solo.
+  Future<bool> createInvoiceForOrder({List<int>? itemIndexes}) async {
+    final order = currentOrder;
+    if (order == null || order.id == null) {
+      error = 'No hay orden guardada para facturar';
+      notifyListeners();
+      return false;
+    }
+
+    if (!isSubmitted) {
+      error = 'La orden debe estar enviada antes de facturar';
+      notifyListeners();
+      return false;
+    }
+
+    if (order.perBilled >= 100) {
+      error = 'La orden ya está facturada al 100%';
+      notifyListeners();
+      return false;
+    }
+
+    isLoading = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      // Traer los items reales del ERP (tienen po_detail y warehouse)
+      final poItems = await erpNextService.getPurchaseOrderItems(order.id!);
+      if (poItems.isEmpty) {
+        error = 'La orden no tiene items en el ERP';
+        isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      // Filtrar por índice si el usuario factura parcial
+      final selected = (itemIndexes == null || itemIndexes.isEmpty)
+          ? poItems
+          : [
+              for (final i in itemIndexes)
+                if (i >= 0 && i < poItems.length) poItems[i],
+            ];
+
+      final invItems = selected.map((it) {
+        // Cantidad pendiente de facturar (qty - billed_qty si viene)
+        final qty = (it['qty'] ?? 0).toDouble();
+        final billedQty = (it['billed_qty'] != null)
+            ? (it['billed_qty'] as num).toDouble()
+            : 0.0;
+        final pending = qty - billedQty;
+        return {
+          'item_code': it['item_code'],
+          'qty': pending > 0 ? pending : qty,
+          'rate': it['rate'] ?? 0,
+          'warehouse': it['warehouse'] ?? order.setWarehouse,
+          'purchase_order_item': it['name'], // po_detail
+          'uom': it['uom'],
+        };
+      }).toList();
+
+      final invoice = await erpNextService.createPurchaseInvoiceFromPO(
+        purchaseOrder: order.id!,
+        supplier: order.supplierId.isNotEmpty ? order.supplierId : order.supplier,
+        items: invItems,
+        costCenter: order.costCenter,
+        setWarehouse: order.setWarehouse,
+      );
+
+      final invoiceName = invoice['name']?.toString() ?? '';
+      if (invoiceName.isEmpty) {
+        throw Exception('El ERP no devolvió el nombre de la factura');
+      }
+
+      // Submit de la factura: el ERP recalcula per_billed y status de la orden
+      await erpNextService.submitPurchaseInvoice(invoiceName);
+
+      // Refrescar el estado real de la orden desde el servidor
+      final statusData = await erpNextService.refreshPurchaseOrderStatus(order.id!);
+      order.erpStatus = (statusData['status'] ?? '').toString();
+      order.perBilled = (statusData['per_billed'] ?? 0).toDouble();
+      order.perReceived = (statusData['per_received'] ?? 0).toDouble();
+
+      isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      error = 'Error facturando orden: $e';
       isLoading = false;
       notifyListeners();
       return false;

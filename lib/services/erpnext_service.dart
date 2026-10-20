@@ -4,6 +4,11 @@ import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import '../models/item_model.dart';
 
+/// UOM válida para el ERP: solo se manda si es real; si falta, el ERP
+/// rellena la del item (stock_uom) solo y evita LinkValidationError.
+bool _validUom(dynamic uom) =>
+    uom is String && uom.trim().isNotEmpty && uom.trim() != 'Unidad';
+
 /// Servicio para conectarse a la API REST de ERPNext/Frappe.
 /// Versión Mobile — usa autenticación por sesión (usuario/contraseña).
 class ErpNextService {
@@ -603,6 +608,7 @@ class ErpNextService {
   }
 
   /// Hace submit de una Purchase Order borrador (docstatus 0 → 1).
+  /// Tras el submit el ERP asigna el estado (normalmente "To Receive and Bill").
   Future<Map<String, dynamic>> submitPurchaseOrder(String name) async {
     try {
       // Paso 1: Obtener el documento completo
@@ -624,23 +630,171 @@ class ErpNextService {
       }
       throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
     } on DioException catch (e) {
-      String detail = '';
-      if (e.response?.data != null) {
-        if (e.response!.data is Map) {
-          detail =
-              e.response!.data['exc'] ??
-              e.response!.data['_server_messages'] ??
-              e.response!.data['message'] ??
-              e.response!.data.toString();
-        } else {
-          detail = e.response!.data.toString();
-        }
-      }
-      if (detail.isNotEmpty) {
-        throw Exception('Servidor: $detail');
-      }
-      throw Exception('Error HTTP ${e.response?.statusCode}: ${e.message}');
+      throw _erpError(e, 'Error enviando orden');
     }
+  }
+
+  /// Cancela una Purchase Order enviada (docstatus 1 → 2).
+  /// El ERP exige el documento completo para cancelar (igual que en submit).
+  Future<Map<String, dynamic>> cancelPurchaseOrder(String name) async {
+    try {
+      final docResponse = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(name)}',
+      );
+      if (docResponse.statusCode != 200 || docResponse.data?['data'] == null) {
+        throw Exception('No se pudo obtener la orden $name para cancelar');
+      }
+      final Map<String, dynamic> doc = docResponse.data['data'];
+
+      final response = await _dio.post(
+        '$baseUrl/api/method/frappe.client.cancel',
+        data: {'doctype': 'Purchase Order', 'docname': name, 'doc': doc},
+      );
+      if (response.statusCode == 200) {
+        return response.data['data'] ?? {};
+      }
+      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+    } on DioException catch (e) {
+      throw _erpError(e, 'Error cancelando orden');
+    }
+  }
+
+  /// Lee el estado real de la orden desde el ERP (status, per_billed, per_received).
+  /// La app NUNCA calcula el estado: lo muestra tal cual lo devuelve el servidor.
+  Future<Map<String, dynamic>> refreshPurchaseOrderStatus(String name) async {
+    final response = await _dio.get(
+      '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(name)}',
+      queryParameters: {
+        'fields':
+            '["name","status","docstatus","per_billed","per_received","grand_total"]',
+      },
+    );
+    if (response.statusCode == 200 && response.data?['data'] != null) {
+      return Map<String, dynamic>.from(response.data['data']);
+    }
+    throw Exception('No se pudo leer el estado de la orden $name');
+  }
+
+  /// Crea un Purchase Invoice como borrador desde una Purchase Order enviada.
+  /// Los items deben traer item_code, qty, rate, purchase_order_item (po_detail)
+  /// y warehouse para que el ERP vincule la factura con la orden.
+  Future<Map<String, dynamic>> createPurchaseInvoiceFromPO({
+    required String purchaseOrder,
+    required String supplier,
+    required List<Map<String, dynamic>> items,
+    String? costCenter,
+    String? setWarehouse,
+  }) async {
+    final doc = {
+      'doctype': 'Purchase Invoice',
+      'supplier': supplier,
+      'posting_date': DateTime.now().toIso8601String().substring(0, 10),
+      'bill_date': DateTime.now().toIso8601String().substring(0, 10),
+      if (setWarehouse != null && setWarehouse.isNotEmpty)
+        'set_warehouse': setWarehouse,
+      if (costCenter != null && costCenter.isNotEmpty)
+        'cost_center': costCenter,
+      'items': items
+          .map(
+            (item) => {
+              'doctype': 'Purchase Invoice Item',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              'rate': item['rate'] ?? 0,
+              'warehouse': item['warehouse'] ?? setWarehouse ?? '',
+              'purchase_order': purchaseOrder,
+              'po_detail': item['purchase_order_item'],
+              if (_validUom(item['uom'])) 'uom': item['uom'],
+            },
+          )
+          .toList(),
+    };
+
+    final response = await _dio.post(
+      '$baseUrl/api/resource/Purchase%20Invoice',
+      data: doc,
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error creando Purchase Invoice: ${response.data}');
+  }
+
+  /// Hace submit de un Purchase Invoice (borrador → enviado).
+  Future<Map<String, dynamic>> submitPurchaseInvoice(String name) async {
+    try {
+      final docResponse = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Invoice/${Uri.encodeComponent(name)}',
+      );
+      if (docResponse.statusCode != 200 || docResponse.data?['data'] == null) {
+        throw Exception('No se pudo obtener la factura $name para enviar');
+      }
+      final Map<String, dynamic> doc = docResponse.data['data'];
+
+      final response = await _dio.post(
+        '$baseUrl/api/method/frappe.client.submit',
+        data: {'doctype': 'Purchase Invoice', 'docname': name, 'doc': doc},
+      );
+      if (response.statusCode == 200) {
+        return response.data['data'] ?? {};
+      }
+      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+    } on DioException catch (e) {
+      throw _erpError(e, 'Error enviando factura');
+    }
+  }
+
+  /// Lista Purchase Invoices vinculadas a una Purchase Order específica.
+  Future<List<Map<String, dynamic>>> listPurchaseInvoicesForPO(
+    String poName,
+  ) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Purchase Invoice',
+          'fields':
+              '["name","supplier","posting_date","docstatus","grand_total","status"]',
+          'filters': jsonEncode([
+            ['Purchase Invoice Item', 'purchase_order', '=', poName],
+          ]),
+          'group_by': 'name',
+          'order_by': 'creation desc',
+          'limit_page_length': 50,
+        },
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('[Service] listPurchaseInvoicesForPO error: $e');
+      return [];
+    }
+  }
+
+  /// Normaliza el error del ERP (DioException) a un mensaje legible.
+  Exception _erpError(DioException e, String fallback) {
+    String detail = '';
+    if (e.response?.data != null) {
+      if (e.response!.data is Map) {
+        detail =
+            e.response!.data['exc'] ??
+            e.response!.data['_server_messages'] ??
+            e.response!.data['message'] ??
+            e.response!.data.toString();
+      } else {
+        detail = e.response!.data.toString();
+      }
+    }
+    if (detail.isNotEmpty) {
+      return Exception('Servidor: $detail');
+    }
+    return Exception(
+      '$fallback — HTTP ${e.response?.statusCode}: ${e.message}',
+    );
   }
 
   /// Obtiene una Purchase Order por nombre.
@@ -659,7 +813,8 @@ class ErpNextService {
     }
   }
 
-  /// Lista Purchase Orders con filtros.
+  /// Lista Purchase Orders con filtros. Trae el estado real del ERP
+  /// (status, per_billed, per_received) para mostrar el ciclo de vida completo.
   Future<List<Map<String, dynamic>>> listPurchaseOrders({
     String? status,
     int limit = 50,
@@ -675,7 +830,7 @@ class ErpNextService {
         queryParameters: {
           'doctype': 'Purchase Order',
           'fields':
-              '["name","supplier","transaction_date","docstatus","grand_total"]',
+              '["name","supplier","transaction_date","docstatus","grand_total","status","per_billed","per_received"]',
           'filters': jsonEncode(filters),
           'order_by': 'creation desc',
           'limit_page_length': limit,
@@ -707,7 +862,7 @@ class ErpNextService {
         queryParameters: {
           'doctype': 'Purchase Receipt',
           'fields':
-              '["name","supplier","posting_date","docstatus","grand_total"]',
+              '["name","supplier","posting_date","docstatus","grand_total","status","per_billed"]',
           'order_by': 'creation desc',
           'limit_page_length': limit,
         },
@@ -721,6 +876,96 @@ class ErpNextService {
       print('[Service] listMaterialReceipts error: $e');
       return [];
     }
+  }
+
+  /// Obtiene los items de un Purchase Receipt enviado (con billed_qty
+  /// para calcular el pendiente de facturar).
+  Future<List<Map<String, dynamic>>> getPurchaseReceiptItems(
+    String prName,
+  ) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Receipt/${Uri.encodeComponent(prName)}',
+        queryParameters: {
+          'fields': '["items","supplier","set_warehouse","cost_center"]',
+        },
+      );
+      if (response.statusCode == 200) {
+        final data = response.data?['data'];
+        final items = data?['items'] ?? [];
+        for (final it in List<Map<String, dynamic>>.from(items)) {
+          it['supplier'] = data['supplier'] ?? '';
+          it['set_warehouse'] = data['set_warehouse'] ?? '';
+          it['cost_center'] = data['cost_center'] ?? '';
+        }
+        return List<Map<String, dynamic>>.from(items);
+      }
+      return [];
+    } catch (e) {
+      print('[Service] getPurchaseReceiptItems error: $e');
+      return [];
+    }
+  }
+
+  /// Obtiene el estado real de un Purchase Receipt desde el ERP
+  /// (status + per_billed — el servidor es la única fuente de verdad).
+  Future<Map<String, dynamic>> refreshPurchaseReceiptStatus(String name) async {
+    final response = await _dio.get(
+      '$baseUrl/api/resource/Purchase%20Receipt/${Uri.encodeComponent(name)}',
+      queryParameters: {
+        'fields': '["name","status","docstatus","per_billed","grand_total"]',
+      },
+    );
+    if (response.statusCode == 200 && response.data?['data'] != null) {
+      return Map<String, dynamic>.from(response.data['data']);
+    }
+    throw Exception('No se pudo leer el estado de la recepción $name');
+  }
+
+  /// Crea un Purchase Invoice como borrador desde un Purchase Receipt enviado.
+  /// Los items deben traer item_code, qty, rate, name (pr_detail) y warehouse
+  /// para que el ERP vincule la factura con la recepción.
+  Future<Map<String, dynamic>> createPurchaseInvoiceFromReceipt({
+    required String purchaseReceipt,
+    required String supplier,
+    required List<Map<String, dynamic>> items,
+    String? costCenter,
+    String? setWarehouse,
+  }) async {
+    final doc = {
+      'doctype': 'Purchase Invoice',
+      'supplier': supplier,
+      'posting_date': DateTime.now().toIso8601String().substring(0, 10),
+      'bill_date': DateTime.now().toIso8601String().substring(0, 10),
+      if (setWarehouse != null && setWarehouse.isNotEmpty)
+        'set_warehouse': setWarehouse,
+      if (costCenter != null && costCenter.isNotEmpty)
+        'cost_center': costCenter,
+      'items': items
+          .map(
+            (item) => {
+              'doctype': 'Purchase Invoice Item',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              'rate': item['rate'] ?? 0,
+              'warehouse': item['warehouse'] ?? setWarehouse ?? '',
+              'purchase_receipt': purchaseReceipt,
+              'pr_detail': item['name'],
+              if (_validUom(item['uom'])) 'uom': item['uom'],
+            },
+          )
+          .toList(),
+    };
+
+    final response = await _dio.post(
+      '$baseUrl/api/resource/Purchase%20Invoice',
+      data: doc,
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error creando Purchase Invoice: ${response.data}');
   }
 
   /// Lista Purchase Orders enviadas (docstatus=1) para crear recepción desde PO.
@@ -775,7 +1020,9 @@ class ErpNextService {
     try {
       final response = await _dio.get(
         '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(poName)}',
-        queryParameters: {'fields': '["name","supplier","set_warehouse","cost_center"]'},
+        queryParameters: {
+          'fields': '["name","supplier","set_warehouse","cost_center"]',
+        },
       );
       if (response.statusCode == 200) {
         return response.data?['data'];
@@ -867,7 +1114,7 @@ class ErpNextService {
               'item_code': item['item_code'],
               'qty': item['qty'],
               'warehouse': warehouse,
-              if (item['uom'] != null) 'uom': item['uom'],
+              if (_validUom(item['uom'])) 'uom': item['uom'],
             },
           )
           .toList(),
@@ -911,13 +1158,12 @@ class ErpNextService {
               'warehouse': warehouse,
               'purchase_order': purchaseOrder,
               'purchase_order_item': item['purchase_order_item'],
-              if (item['uom'] != null) 'uom': item['uom'],
+              if (_validUom(item['uom'])) 'uom': item['uom'],
               if (item['rate'] != null) 'rate': item['rate'],
               if (item['price_list_rate'] != null &&
                   (item['price_list_rate'] as num) > 0)
                 'price_list_rate': item['price_list_rate'],
-              if (item['net_amount'] != null &&
-                  (item['net_amount'] as num) > 0)
+              if (item['net_amount'] != null && (item['net_amount'] as num) > 0)
                 'net_amount': item['net_amount'],
             },
           )
@@ -952,13 +1198,12 @@ class ErpNextService {
                 'purchase_order': item['purchase_order'],
               if (item['purchase_order_item'] != null)
                 'purchase_order_item': item['purchase_order_item'],
-              if (item['uom'] != null) 'uom': item['uom'],
+              if (_validUom(item['uom'])) 'uom': item['uom'],
               if (item['rate'] != null) 'rate': item['rate'],
               if (item['price_list_rate'] != null &&
                   (item['price_list_rate'] as num) > 0)
                 'price_list_rate': item['price_list_rate'],
-              if (item['net_amount'] != null &&
-                  (item['net_amount'] as num) > 0)
+              if (item['net_amount'] != null && (item['net_amount'] as num) > 0)
                 'net_amount': item['net_amount'],
             },
           )
@@ -1026,9 +1271,9 @@ class ErpNextService {
           'doctype': 'Purchase Receipt',
           'fields':
               '["name","supplier","posting_date","docstatus","grand_total"]',
-          'filters': jsonEncode([[
-            'Purchase Receipt Item', 'purchase_order', '=', poName,
-          ]]),
+          'filters': jsonEncode([
+            ['Purchase Receipt Item', 'purchase_order', '=', poName],
+          ]),
           'group_by': 'name',
           'order_by': 'creation desc',
           'limit_page_length': 50,
@@ -1109,7 +1354,7 @@ class ErpNextService {
         final cur = companyResponse.data?['data']?['default_currency'];
         if (cur != null && cur.toString().isNotEmpty) {
           print('[Service] Company currency (User): $cur');
-          this.currency = cur.toString();
+          currency = cur.toString();
           return cur.toString();
         }
       }
@@ -1135,7 +1380,7 @@ class ErpNextService {
         final cur = companyResponse.data?['data']?['default_currency'];
         if (cur != null && cur.toString().isNotEmpty) {
           print('[Service] Company currency (SystemSettings): $cur');
-          this.currency = cur.toString();
+          currency = cur.toString();
           return cur.toString();
         }
       }
@@ -1147,14 +1392,17 @@ class ErpNextService {
     try {
       final listRes = await _dio.get(
         '$baseUrl/api/resource/Company',
-        queryParameters: {'fields': '["name","default_currency"]', 'limit_page_length': '1'},
+        queryParameters: {
+          'fields': '["name","default_currency"]',
+          'limit_page_length': '1',
+        },
       );
       final items = listRes.data?['data'];
       if (items is List && items.isNotEmpty) {
         final cur = items[0]['default_currency'];
         if (cur != null && cur.toString().isNotEmpty) {
           print('[Service] Company currency (first company): $cur');
-          this.currency = cur.toString();
+          currency = cur.toString();
           return cur.toString();
         }
       }
