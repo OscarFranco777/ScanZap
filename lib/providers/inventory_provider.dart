@@ -69,6 +69,9 @@ class InventoryProvider with ChangeNotifier {
     required String password,
     bool rememberMe = false,
     void Function(int loaded, int? total)? onProgress,
+    // Si true, el login NO carga el catálogo de productos: entra directo al
+    // panel y los items se cargan después con loadInitialItems().
+    bool deferItems = false,
   }) async {
     connectionError = '';
     isLoadingItems = true;
@@ -107,6 +110,46 @@ class InventoryProvider with ChangeNotifier {
         return false;
       }
 
+      if (deferItems) {
+        // Login rápido: conectar y entrar al panel. Los items llegan después
+        // en segundo plano vía loadInitialItems().
+        isConnected = true;
+        isLoadingItems = false;
+      } else {
+        await loadInitialItems(onProgress: onProgress);
+        isConnected = true;
+      }
+
+      // Obtener moneda de la company
+      try {
+        companyCurrency = await erpNextService.fetchCompanyCurrency();
+        print('[Provider] Company currency: $companyCurrency');
+      } catch (_) {
+        companyCurrency = '';
+      }
+
+      // Guardar configuración
+      await _saveConfig(url, username, rememberMe ? password : '');
+      notifyListeners();
+      return true;
+    } catch (e) {
+      connectionError = 'Error de conexión: $e';
+      isConnected = false;
+      isLoadingItems = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Carga el catálogo de productos + barcodes + config de UOMs.
+  /// Se llama tras el login (directo, o en segundo plano si el login fue
+  /// con deferItems para no bloquear la entrada al panel).
+  Future<void> loadInitialItems({
+    void Function(int loaded, int? total)? onProgress,
+  }) async {
+    isLoadingItems = true;
+    notifyListeners();
+    try {
       // Cargar items con barcodes
       final result = await erpNextService.fetchAllItemsAndBarcodes(onProgress: onProgress);
       allItems = result.items;
@@ -127,28 +170,9 @@ class InventoryProvider with ChangeNotifier {
       try {
         await erpNextService.ensureUomSettingsLoaded();
       } catch (_) {}
-
-      isConnected = true;
-      isLoadingItems = false;
-
-      // Obtener moneda de la company
-      try {
-        companyCurrency = await erpNextService.fetchCompanyCurrency();
-        print('[Provider] Company currency: $companyCurrency');
-      } catch (_) {
-        companyCurrency = '';
-      }
-
-      // Guardar configuración
-      await _saveConfig(url, username, rememberMe ? password : '');
-      notifyListeners();
-      return true;
-    } catch (e) {
-      connectionError = 'Error de conexión: $e';
-      isConnected = false;
+    } finally {
       isLoadingItems = false;
       notifyListeners();
-      return false;
     }
   }
 

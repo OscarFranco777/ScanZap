@@ -4,6 +4,7 @@ import 'providers/inventory_provider.dart';
 import 'providers/purchase_order_provider.dart';
 import 'providers/material_receipt_provider.dart';
 import 'providers/purchase_invoice_provider.dart';
+import 'providers/stock_entry_provider.dart';
 import 'services/erpnext_service.dart';
 import 'views/config_screen.dart';
 import 'views/excel_upload_screen.dart';
@@ -16,6 +17,8 @@ import 'views/material_receipt_list_screen.dart';
 import 'views/material_receipt_detail_screen.dart';
 import 'views/purchase_invoice_list_screen.dart';
 import 'views/purchase_invoice_detail_screen.dart';
+import 'views/stock_entry_list_screen.dart';
+import 'views/stock_entry_detail_screen.dart';
 
 void main() {
   // Singleton: un solo servicio de ERPNext para toda la app
@@ -48,6 +51,9 @@ class InventarioApp extends StatelessWidget {
         ),
         ChangeNotifierProvider(
           create: (_) => PurchaseInvoiceProvider(erpNextService: erpNextService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => StockEntryProvider(erpNextService: erpNextService),
         ),
       ],
       child: MaterialApp(
@@ -90,6 +96,9 @@ class InventarioApp extends StatelessWidget {
           '/pi-list': (_) => const PurchaseInvoiceListScreen(),
           '/pi-create': (_) => const PurchaseInvoiceDetailScreen(),
           '/pi-detail': (_) => const PurchaseInvoiceDetailScreen(),
+          '/se-list': (_) => const StockEntryListScreen(),
+          '/se-create': (_) => const StockEntryDetailScreen(),
+          '/se-detail': (_) => const StockEntryDetailScreen(),
         },
       ),
     );

@@ -95,11 +95,16 @@ Future<double?> showQtyInputDialog(
 /// Tarjeta de resumen de totales: Subtotal / Impuesto / Total.
 /// Si [tax] o [total] son null (documento aún no guardado en el ERP),
 /// muestra "—" y aclara que los impuestos los calcula el ERP al guardar.
+/// Modo [qtyOnly]: muestra solo el TOTAL DE UNIDADES (para movimientos de
+/// stock sin importe, como las Entradas de Inventario).
 Widget buildTotalsSummary({
   required double subtotal,
   double? tax,
   double? total,
   String currency = '',
+  bool qtyOnly = false,
+  bool hideTaxRow = false,
+  String totalLabel = 'Total',
 }) {
   // Símbolo si lo conocemos; si no, el código de la moneda (ej: HNL).
   String cur = currency;
@@ -144,6 +149,43 @@ Widget buildTotalsSummary({
 
   final missingTax = tax == null || total == null;
 
+  // Modo solo unidades: un único contador de cantidad total.
+  if (qtyOnly) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppDesign.tealLight.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppDesign.tealIcon.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.inventory, size: 14, color: AppDesign.tealIcon),
+          const SizedBox(width: 6),
+          Text(
+            'TOTAL DE UNIDADES',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: AppDesign.tealIcon,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            fmtQty(subtotal),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: AppDesign.navy,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   return Container(
     margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
     padding: const EdgeInsets.all(12),
@@ -172,15 +214,16 @@ Widget buildTotalsSummary({
         ),
         const SizedBox(height: 6),
         totalsRow('Subtotal', money(subtotal)),
-        totalsRow('Impuesto', tax != null ? money(tax) : '—'),
+        if (!hideTaxRow)
+          totalsRow('Impuesto', tax != null ? money(tax) : '—'),
         Divider(
           height: 12,
           thickness: 1,
           color: AppDesign.tealIcon.withValues(alpha: 0.3),
         ),
-        totalsRow('Total', total != null ? money(total) : '—',
+        totalsRow(totalLabel, total != null ? money(total) : '—',
             fontSize: 16, weight: FontWeight.w800),
-        if (missingTax)
+        if (missingTax && !hideTaxRow)
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(

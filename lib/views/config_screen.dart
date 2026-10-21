@@ -52,20 +52,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
     final provider = context.read<InventoryProvider>();
 
+    // Login rápido: solo autentica y configura la sesión. El catálogo de
+    // productos se carga en segundo plano DESPUÉS de entrar al panel principal.
     final ok = await provider.connectToErpNext(
       url: _urlController.text,
       username: _userController.text,
       password: _passController.text,
       rememberMe: _rememberMe,
-      onProgress: (loaded, total) {
-        if (mounted) {
-          setState(() {
-            _progressText = total != null
-                ? 'Cargando productos... $loaded / $total'
-                : 'Cargando productos... $loaded';
-          });
-        }
-      },
+      deferItems: true,
     );
 
     if (!mounted) return;
@@ -75,12 +69,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
     if (ok) {
       setState(() => _isConnected = true);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Conectado — ${provider.allItems.length} productos cargados'),
+        const SnackBar(
+          content: Text('✅ Conectado — cargando productos en segundo plano...'),
           backgroundColor: Colors.green,
         ),
       );
       Navigator.of(context).pushReplacementNamed('/home');
+      // Carga de productos en segundo plano, sin bloquear el panel principal.
+      provider.loadInitialItems();
     } else {
       setState(() => _error = provider.connectionError);
     }

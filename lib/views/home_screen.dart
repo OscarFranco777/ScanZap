@@ -137,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     const SizedBox(height: 14),
 
-                    // Row 2.5: Facturas de Compra
+                    // Row 2.5: Facturas de Compra + Entradas de Inventario
                     Row(
                       children: [
                         Expanded(
@@ -151,7 +151,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                         const SizedBox(width: 14),
-                        const Expanded(child: SizedBox()),
+                        Expanded(
+                          child: _ModuleCard(
+                            title: 'Entradas de\nInventario',
+                            icon: Icons.swap_horiz,
+                            bgColor: const Color(0xFFE0F2F1),
+                            iconBgColor: const Color(0xFFB2DFDB),
+                            iconColor: const Color(0xFF00695C),
+                            onTap: () => Navigator.pushNamed(context, '/se-list'),
+                          ),
+                        ),
                       ],
                     ),
 

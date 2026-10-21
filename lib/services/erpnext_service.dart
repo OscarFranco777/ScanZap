@@ -1636,4 +1636,223 @@ class ErpNextService {
 
     return '';
   }
+
+  // ══════════════════════════════════════════════════════════════
+  // ENTRADA DE INVENTARIO (Stock Entry)
+  // ══════════════════════════════════════════════════════════════
+
+  /// Lista los tipos de Stock Entry desde el ERP (doctype `Stock Entry Type`).
+  /// La app solo usa: Material Receipt, Material Transfer y Material Issue.
+  Future<List<Map<String, dynamic>>> fetchStockEntryTypes() async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Stock Entry Type',
+          'fields': '["name","purpose"]',
+          'limit_page_length': 20,
+        },
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        final all = data.cast<Map<String, dynamic>>().toList();
+        // Filtrar a los tipos que la app puede armar bien
+        final allowed = {
+          'Material Receipt',
+          'Material Transfer',
+          'Material Issue',
+        };
+        return all.where((t) => allowed.contains(t['name'])).toList();
+      }
+      return [];
+    } catch (e) {
+      print('[Service] fetchStockEntryTypes error: $e');
+      return [];
+    }
+  }
+
+  /// Lista Stock Entries existentes.
+  Future<List<Map<String, dynamic>>> listStockEntries({
+    int limit = 50,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Stock Entry',
+          'fields':
+              '["name","stock_entry_type","posting_date","docstatus","creation"]',
+          'order_by': 'creation desc',
+          'limit_page_length': limit,
+        },
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('[Service] listStockEntries error: $e');
+      return [];
+    }
+  }
+
+  /// Obtiene el detalle completo de un Stock Entry por nombre.
+  Future<Map<String, dynamic>?> getStockEntry(String name) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
+      );
+      if (response.statusCode == 200) {
+        return response.data?['data'];
+      }
+      return null;
+    } catch (e) {
+      print('[Service] getStockEntry error: $e');
+      return null;
+    }
+  }
+
+  /// Crea un Stock Entry como borrador (docstatus=0).
+  /// [costCenter] se pega en cada fila de items; los almacenes de la fila
+  /// (s_warehouse/t_warehouse) mandan — los de cabecera son solo default.
+  Future<Map<String, dynamic>> createStockEntry({
+    required String stockEntryType,
+    required List<Map<String, dynamic>> items,
+    String? sourceWarehouse,
+    String? targetWarehouse,
+    String? costCenter,
+    String? remarks,
+    String? namingSeries,
+  }) async {
+    final doc = {
+      'doctype': 'Stock Entry',
+      'stock_entry_type': stockEntryType,
+      'posting_date': DateTime.now().toIso8601String().substring(0, 10),
+      if (namingSeries != null && namingSeries.isNotEmpty)
+        'naming_series': namingSeries,
+      if (sourceWarehouse != null && sourceWarehouse.isNotEmpty)
+        'from_warehouse': sourceWarehouse,
+      // El header del Stock Entry usa 'to_warehouse' (t_warehouse es el
+      // campo de la FILA). Con t_warehouse el ERP lo ignora y el destino
+      // queda vacío → ValidationError al guardar.
+      if (targetWarehouse != null && targetWarehouse.isNotEmpty)
+        'to_warehouse': targetWarehouse,
+      if (remarks != null && remarks.isNotEmpty) 'remarks': remarks,
+      if (costCenter != null && costCenter.isNotEmpty)
+        'cost_center': costCenter,
+      'items': items
+          .map(
+            (item) => {
+              'doctype': 'Stock Entry Detail',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              's_warehouse': item['s_warehouse'] ?? sourceWarehouse ?? '',
+              't_warehouse': item['t_warehouse'] ?? targetWarehouse ?? '',
+              if (costCenter != null && costCenter.isNotEmpty)
+                'cost_center': costCenter,
+              if (_validUom(item['uom'])) 'uom': item['uom'],
+            },
+          )
+          .toList(),
+    };
+
+    final response = await _dio.post(
+      '$baseUrl/api/resource/Stock%20Entry',
+      data: doc,
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error creando Stock Entry: ${response.data}');
+  }
+
+  /// Actualiza un Stock Entry borrador existente (items + cabecera).
+  Future<Map<String, dynamic>> updateStockEntry({
+    required String name,
+    required String stockEntryType,
+    required List<Map<String, dynamic>> items,
+    String? sourceWarehouse,
+    String? targetWarehouse,
+    String? costCenter,
+    String? remarks,
+  }) async {
+    final doc = {
+      'stock_entry_type': stockEntryType,
+      if (sourceWarehouse != null) 'from_warehouse': sourceWarehouse,
+      // Header del Stock Entry usa 'to_warehouse', no 't_warehouse'.
+      if (targetWarehouse != null) 'to_warehouse': targetWarehouse,
+      if (remarks != null) 'remarks': remarks,
+      if (costCenter != null) 'cost_center': costCenter,
+      'items': items
+          .map(
+            (item) => {
+              'doctype': 'Stock Entry Detail',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              's_warehouse': item['s_warehouse'] ?? sourceWarehouse ?? '',
+              't_warehouse': item['t_warehouse'] ?? targetWarehouse ?? '',
+              if (costCenter != null && costCenter.isNotEmpty)
+                'cost_center': costCenter,
+              if (_validUom(item['uom'])) 'uom': item['uom'],
+            },
+          )
+          .toList(),
+    };
+
+    final response = await _dio.put(
+      '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
+      data: doc,
+    );
+
+    if (response.statusCode == 200) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error actualizando Stock Entry: ${response.data}');
+  }
+
+  /// Hace submit de un Stock Entry (docstatus 0 → 1).
+  Future<Map<String, dynamic>> submitStockEntry(String name) async {
+    try {
+      final docResponse = await _dio.get(
+        '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
+      );
+      if (docResponse.statusCode != 200 ||
+          docResponse.data?['data'] == null) {
+        throw Exception('No se pudo obtener el Stock Entry $name para enviar');
+      }
+      final Map<String, dynamic> doc = docResponse.data['data'];
+
+      final response = await _dio.post(
+        '$baseUrl/api/method/frappe.client.submit',
+        data: {'doctype': 'Stock Entry', 'docname': name, 'doc': doc},
+      );
+      if (response.statusCode == 200) {
+        return response.data['data'] ?? {};
+      }
+      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+    } on DioException catch (e) {
+      String detail = '';
+      if (e.response?.data != null) {
+        if (e.response!.data is Map) {
+          detail = e.response!.data['exc'] ??
+              e.response!.data['_server_messages'] ??
+              e.response!.data['message'] ??
+              e.response!.data.toString();
+        } else {
+          detail = e.response!.data.toString();
+        }
+      }
+      if (detail.isNotEmpty) {
+        throw Exception('Servidor: $detail');
+      }
+      throw Exception('Error HTTP ${e.response?.statusCode}: ${e.message}');
+    }
+  }
+
+  /// Obtiene las naming_series disponibles para Stock Entry.
+  Future<List<String>> fetchStockEntryNamingSeries() async {
+    return await fetchNamingSeries('Stock Entry');
+  }
 }
