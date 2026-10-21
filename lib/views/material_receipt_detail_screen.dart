@@ -156,7 +156,7 @@ class _MaterialReceiptDetailScreenState
       HapticFeedback.mediumImpact();
       try {
         final provider = context.read<MaterialReceiptProvider>();
-        final qty = double.tryParse(_qtyController.text.trim().replaceAll(',', '.')) ?? 1.0;
+        final qty = parseFlexibleNumber(_qtyController.text) ?? 1.0;
         await provider.scanItemToReceipt(code, quantity: qty);
         _qtyController.text = '1';
         _scanController.clear();
@@ -1005,9 +1005,7 @@ class _MaterialReceiptDetailScreenState
                           title: 'Buscar producto',
                         );
                         if (row == null || !mounted) return;
-                        final qty = double.tryParse(
-                              _qtyController.text.trim().replaceAll(',', '.'),
-                            ) ??
+                        final qty = parseFlexibleNumber(_qtyController.text) ??
                             1.0;
                         await provider.addItemToReceiptByCode(
                           (row['name'] ?? '').toString(),
@@ -1612,7 +1610,7 @@ class _MaterialReceiptDetailScreenState
                             ),
                             controller: _getPriceController(item.itemCode, 'priceListRate', item.priceListRate),
                             onChanged: (val) {
-                              final parsed = double.tryParse(val) ?? 0.0;
+                              final parsed = parseFlexibleNumber(val) ?? 0.0;
                               provider.updateItemPriceListRate(index, parsed);
                             },
                             onTapOutside: (_) {
@@ -1664,7 +1662,7 @@ class _MaterialReceiptDetailScreenState
                             ),
                             controller: _getPriceController(item.itemCode, 'netAmount', item.netAmount),
                             onChanged: (val) {
-                              final parsed = double.tryParse(val) ?? 0.0;
+                              final parsed = parseFlexibleNumber(val) ?? 0.0;
                               provider.updateItemNetAmount(index, parsed);
                             },
                             onTapOutside: (_) {

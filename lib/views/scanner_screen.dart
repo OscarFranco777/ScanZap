@@ -117,7 +117,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
   double _getQty() {
     final parsed =
-        double.tryParse(_qtyController.text.trim().replaceAll(',', '.'));
+        parseFlexibleNumber(_qtyController.text);
     return (parsed != null && parsed > 0) ? parsed : 1.0;
   }
 
@@ -240,7 +240,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             onPressed: () {
               Navigator.of(ctx).pop();
               final qty =
-                  double.tryParse(qtyCtrl.text.trim().replaceAll(',', '.')) ?? 1.0;
+                  parseFlexibleNumber(qtyCtrl.text) ?? 1.0;
               _qtyController.text = fmtQty(qty);
               _processScan(_manualController.text);
               _manualController.clear();

@@ -591,8 +591,9 @@ class MaterialReceiptProvider with ChangeNotifier {
         throw Exception('El ERP no devolvió el nombre de la factura');
       }
 
-      // Submit de la factura: el ERP recalcula per_billed y status del receipt
-      await erpNextService.submitPurchaseInvoice(invoiceName);
+      // La factura queda en BORRADOR (docstatus=0): el usuario la revisa
+      // (precios, bill_no) y la envía desde la pantalla de la factura.
+      // Ojo: per_billed del receipt no se actualiza hasta que se envíe.
 
       // Refrescar el estado real del receipt desde el servidor
       final fresh = await erpNextService.refreshPurchaseReceiptStatus(receiptName);

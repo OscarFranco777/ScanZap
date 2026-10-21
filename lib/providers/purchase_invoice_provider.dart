@@ -553,9 +553,15 @@ class PurchaseInvoiceProvider with ChangeNotifier {
         );
       }
 
-      currentInvoice!.id = result['name'];
-      currentInvoice!.status = 'Borrador';
+      currentInvoice!.id = (result['name'] ?? currentInvoice!.id).toString();
       isSaved = true;
+
+      // Refrescar desde el ERP: trae los costos reales que calculó el
+      // sistema (precios, impuestos y totales) sin salir de la pantalla.
+      await loadInvoice(currentInvoice!.id!);
+      // El guardado sí funcionó; un fallo del refresco no invalida el guardado
+      // (loadInvoice conserva el estado local si falla).
+      error = '';
 
       // Refrescar la lista de facturas para que aparezca la nueva
       fetchInvoices();

@@ -9,6 +9,36 @@ String fmtQty(num q) {
   return q.toString();
 }
 
+/// Parseo tolerante de números escritos a mano:
+/// - "1,234.56" → 1234.56 (coma de miles + punto decimal)
+/// - "1.234,56" → 1234.56 (punto de miles + coma decimal)
+/// - "12,5"     → 12.5   (coma decimal)
+/// - "1,234"    → 1234   (coma de miles: 3+ dígitos después)
+/// - "1234.5"   → 1234.5 (punto decimal)
+double? parseFlexibleNumber(String raw) {
+  var cleaned = raw.trim();
+  if (cleaned.isEmpty) return null;
+  cleaned = cleaned.replaceAll(RegExp(r'[$L\s]'), '');
+
+  if (cleaned.contains(',') && cleaned.contains('.')) {
+    // El separador que aparece más a la derecha es el decimal.
+    if (cleaned.lastIndexOf(',') < cleaned.lastIndexOf('.')) {
+      cleaned = cleaned.replaceAll(',', '');
+    } else {
+      cleaned = cleaned.replaceAll('.', '').replaceAll(',', '.');
+    }
+  } else if (cleaned.contains(',')) {
+    // Solo coma: decimal (12,5 / 12,50) o miles (1,234).
+    final parts = cleaned.split(',');
+    if (parts.last.length <= 2) {
+      cleaned = cleaned.replaceAll(',', '.');
+    } else {
+      cleaned = cleaned.replaceAll(',', '');
+    }
+  }
+  return double.tryParse(cleaned);
+}
+
 /// Diálogo para editar la cantidad exacta de un item.
 /// Si [allowsDecimals] es false, valida que la cantidad sea entera.
 Future<double?> showQtyInputDialog(
@@ -42,7 +72,7 @@ Future<double?> showQtyInputDialog(
           ),
           ElevatedButton(
             onPressed: () {
-              final parsed = double.tryParse(controller.text.trim().replaceAll(',', '.'));
+              final parsed = parseFlexibleNumber(controller.text);
               if (parsed == null || parsed < 0) {
                 setDialogState(() => errorText = 'Cantidad inválida');
                 return;

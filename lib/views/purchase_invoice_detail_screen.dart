@@ -126,6 +126,18 @@ class _PurchaseInvoiceDetailScreenState
     return _rateControllers[key]!;
   }
 
+  /// Sincroniza los controllers de precio con los valores reales del ERP
+  /// (tras guardar, el ERP ajusta el costo). No pisa el campo que el
+  /// usuario está editando en este momento.
+  void _syncRateControllers(PurchaseInvoiceProvider provider) {
+    if (_priceEditing) return; // no pisar lo que el usuario está editando
+    for (final item in provider.currentInvoice?.items ?? []) {
+      final c = _rateControllers[item.itemCode];
+      if (c == null) continue;
+      c.text = item.rate > 0 ? item.rate.toStringAsFixed(2) : '';
+    }
+  }
+
   void _cleanupRateControllers(List<PurchaseInvoiceItem> items) {
     final activeKeys = <String>{};
     for (final item in items) {
@@ -185,9 +197,7 @@ class _PurchaseInvoiceDetailScreenState
       HapticFeedback.mediumImpact();
       try {
         final provider = context.read<PurchaseInvoiceProvider>();
-        final qty = double.tryParse(
-                _qtyController.text.trim().replaceAll(',', '.')) ??
-            1.0;
+        final qty = parseFlexibleNumber(_qtyController.text) ?? 1.0;
         await provider.scanItemToInvoice(code, quantity: qty);
         _qtyController.text = '1';
         _scanController.clear();
@@ -326,6 +336,10 @@ class _PurchaseInvoiceDetailScreenState
     if (!mounted) return;
 
     if (ok) {
+      // El provider ya refrescó la factura desde el ERP — traer los
+      // precios de costo reales a los campos sin salir de la pantalla.
+      _syncRateControllers(provider);
+      setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -456,7 +470,10 @@ class _PurchaseInvoiceDetailScreenState
                 ),
               if (invoice?.id != null && !provider.isSubmitted)
                 GestureDetector(
-                  onTap: () => provider.loadInvoice(invoice!.id!),
+                  onTap: () async {
+                    await provider.loadInvoice(invoice!.id!);
+                    if (mounted) _syncRateControllers(provider);
+                  },
                   child: Container(
                     width: 36,
                     height: 36,
@@ -1172,9 +1189,7 @@ class _PurchaseInvoiceDetailScreenState
                           title: 'Buscar producto',
                         );
                         if (row == null || !mounted) return;
-                        final qty = double.tryParse(
-                              _qtyController.text.trim().replaceAll(',', '.'),
-                            ) ??
+                        final qty = parseFlexibleNumber(_qtyController.text) ??
                             1.0;
                         await provider.addItemToInvoiceByCode(
                           (row['name'] ?? '').toString(),
@@ -1784,7 +1799,8 @@ class _PurchaseInvoiceDetailScreenState
                             controller: _getRateController(
                                 item.itemCode, item.rate),
                             onChanged: (val) {
-                              final parsed = double.tryParse(val) ?? 0.0;
+                              final parsed =
+                                  parseFlexibleNumber(val) ?? 0.0;
                               provider.updateItemRate(index, parsed);
                             },
                             onTap: () {

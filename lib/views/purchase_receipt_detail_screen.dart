@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../services/erpnext_service.dart';
 import '../theme/app_design.dart';
 
@@ -273,7 +272,7 @@ class _PurchaseReceiptDetailScreenState
                   _infoRow('Centro de Costos', data['cost_center']),
                 _infoRow(
                   'Total',
-                  'L ${NumberFormat('#,##0.00').format(data['grand_total'] ?? 0)}',
+                  'L ${((data['grand_total'] ?? 0) as num).toDouble().toStringAsFixed(2)}',
                   isBold: true,
                 ),
               ],

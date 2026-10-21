@@ -145,7 +145,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     HapticFeedback.mediumImpact();
 
     final provider = context.read<PurchaseOrderProvider>();
-    final qty = double.tryParse(_qtyController.text.trim().replaceAll(',', '.')) ?? 1.0;
+    final qty = parseFlexibleNumber(_qtyController.text) ?? 1.0;
     provider.scanItemToOrder(code, quantity: qty);
     _qtyController.text = '1';
     _scanController.clear();
@@ -512,7 +512,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     HapticFeedback.mediumImpact();
 
     final qty =
-        double.tryParse(_prQtyController.text.trim().replaceAll(',', '.')) ?? 1.0;
+        parseFlexibleNumber(_prQtyController.text) ?? 1.0;
     final cleanCode = code.trim().toUpperCase();
 
     final existingIndex = _prItems.indexWhere(
@@ -1452,9 +1452,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                           title: 'Buscar producto',
                         );
                         if (row == null || !mounted) return;
-                        final qty = double.tryParse(
-                              _qtyController.text.trim().replaceAll(',', '.'),
-                            ) ??
+                        final qty = parseFlexibleNumber(_qtyController.text) ??
                             1.0;
                         await provider.addItemToOrderByCode(
                           (row['name'] ?? '').toString(),
@@ -2414,7 +2412,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
             ),
             controller: _getPRRateController(itemCode, rate),
             onChanged: (val) {
-              final parsed = double.tryParse(val.replaceAll(',', '.')) ?? 0.0;
+              final parsed = parseFlexibleNumber(val) ?? 0.0;
               if (index < _prItems.length) {
                 _prItems[index]['rate'] = parsed;
               }
@@ -2675,9 +2673,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     title: 'Buscar producto',
                   );
                   if (row == null || !mounted) return;
-                  final qty = double.tryParse(
-                        _prQtyController.text.trim().replaceAll(',', '.'),
-                      ) ??
+                  final qty = parseFlexibleNumber(_prQtyController.text) ??
                       1.0;
                   setState(() {
                     _prItems.insert(0, {
