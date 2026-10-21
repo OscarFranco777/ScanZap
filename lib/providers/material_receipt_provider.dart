@@ -74,12 +74,18 @@ class MaterialReceiptProvider with ChangeNotifier {
   }
 
   /// Carga catálogos (almacenes, naming series PR, centros de costo) desde ERPNext.
+  /// Si la app aún no conectó (URL vacía), espera hasta 30s a que conecte.
   Future<void> fetchCatalogs() async {
+    for (var i = 0; i < 30 && erpNextService.baseUrl.isEmpty; i++) {
+      await Future.delayed(const Duration(seconds: 1));
+    }
     try {
       final results = await Future.wait([
         erpNextService.fetchWarehouses(),
         erpNextService.fetchPurchaseReceiptNamingSeries(),
         erpNextService.fetchCostCenters(),
+        // Config de UOMs (cuáles admiten decimales) — para libras, kg, etc.
+        erpNextService.ensureUomSettingsLoaded(),
       ]);
       warehouses = List<Map<String, dynamic>>.from(results[0] as List);
       namingSeriesOptions = List<String>.from(results[1] as List);
@@ -204,8 +210,64 @@ class MaterialReceiptProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Agrega un item a la recepción por código, SIN crear items nuevos
+  /// (usado por la búsqueda manual: solo items existentes del ERP).
+  Future<bool> addItemToReceiptByCode(String code, {double quantity = 1}) async {
+    if (currentReceipt == null) return false;
+
+    final cleanCode = code.trim();
+    if (cleanCode.isEmpty) return false;
+
+    // Buscar en caché local o traer del ERP
+    ItemModel? item = itemsByCode[cleanCode.toUpperCase()];
+    if (item == null) {
+      final stripped = cleanCode.replaceFirst(RegExp(r'^0+'), '');
+      item = itemsByCode[stripped.toUpperCase()];
+    }
+    if (item == null) {
+      try {
+        item = await erpNextService.fetchItemByCode(cleanCode);
+        if (item != null) {
+          itemsByCode[item.itemCode.toUpperCase()] = item;
+        }
+      } catch (e) {
+        print('[MR] Error fetch item: $e');
+      }
+    }
+
+    if (item == null) {
+      lastScanMessage = '❌ Item "$cleanCode" no encontrado en ERPNext';
+      lastScanWasError = true;
+      notifyListeners();
+      return false;
+    }
+
+    // LIFO: el producto recién agregado siempre queda de primero en la pila.
+    final existingIndex = currentReceipt!.items.indexWhere(
+      (i) => i.itemCode.toUpperCase() == item!.itemCode.toUpperCase(),
+    );
+    if (existingIndex >= 0) {
+      final updated = currentReceipt!.items.removeAt(existingIndex);
+      updated.qty += quantity;
+      currentReceipt!.items.insert(0, updated);
+      lastScanMessage = '✅ ${item.itemName} — qty: ${updated.qty}';
+    } else {
+      currentReceipt!.items.insert(0, MaterialReceiptItem(
+        itemCode: item.itemCode,
+        itemName: item.itemName,
+        qty: quantity,
+        warehouse: currentReceipt!.warehouse,
+      ));
+      lastScanMessage = '✅ Nuevo: ${item.itemName} — ${quantity}uds';
+    }
+
+    lastScanWasError = false;
+    notifyListeners();
+    return true;
+  }
+
   /// Agrega un item escaneado a la recepción actual.
-  Future<bool> scanItemToReceipt(String code, {int quantity = 1}) async {
+  Future<bool> scanItemToReceipt(String code, {double quantity = 1}) async {
     if (currentReceipt == null) return false;
 
     final cleanCode = code.trim();
@@ -262,11 +324,14 @@ class MaterialReceiptProvider with ChangeNotifier {
       (i) => i.itemCode.toUpperCase() == item!.itemCode.toUpperCase(),
     );
 
+    // LIFO: el producto recién escaneado siempre queda de primero en la pila.
     if (existingIndex >= 0) {
-      currentReceipt!.items[existingIndex].qty += quantity;
-      lastScanMessage = '✅ ${item.itemName} — qty: ${currentReceipt!.items[existingIndex].qty}';
+      final updated = currentReceipt!.items.removeAt(existingIndex);
+      updated.qty += quantity;
+      currentReceipt!.items.insert(0, updated);
+      lastScanMessage = '✅ ${item.itemName} — qty: ${updated.qty}';
     } else {
-      currentReceipt!.items.add(MaterialReceiptItem(
+      currentReceipt!.items.insert(0, MaterialReceiptItem(
         itemCode: item.itemCode,
         itemName: item.itemName,
         qty: quantity,
@@ -281,7 +346,7 @@ class MaterialReceiptProvider with ChangeNotifier {
   }
 
   /// Actualiza la cantidad de un item.
-  void updateItemQty(int index, int newQty) {
+  void updateItemQty(int index, double newQty) {
     if (currentReceipt == null) return;
     if (index < 0 || index >= currentReceipt!.items.length) return;
 

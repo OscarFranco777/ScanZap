@@ -12,6 +12,7 @@ import '../services/erpnext_service.dart';
 import '../models/purchase_order.dart';
 import '../theme/app_design.dart';
 import 'purchase_receipt_detail_screen.dart';
+import 'ui_helpers.dart';
 
 /// Pantalla de creación y detalle de Orden de Compra.
 /// Incluye escáner de cámara y entrada manual.
@@ -144,7 +145,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     HapticFeedback.mediumImpact();
 
     final provider = context.read<PurchaseOrderProvider>();
-    final qty = int.tryParse(_qtyController.text.trim()) ?? 1;
+    final qty = double.tryParse(_qtyController.text.trim().replaceAll(',', '.')) ?? 1.0;
     provider.scanItemToOrder(code, quantity: qty);
     _qtyController.text = '1';
     _scanController.clear();
@@ -326,52 +327,42 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
   /// Crea y envía la factura de la orden (lo pendiente de facturar).
   /// El ERP actualiza per_billed y el status de la orden solo.
+  /// Abre la pantalla de Registro de Factura de Compra con los datos de la
+  /// orden precargados. Al venir directo de la orden (sin recepción), la
+  /// factura se crea con el tilde "Actualizar inventario" marcado.
   Future<void> _facturarOrder() async {
     final provider = context.read<PurchaseOrderProvider>();
     final order = provider.currentOrder;
     if (order == null || !order.canBill) return;
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Facturar orden'),
-        content: Text(
-          'Se creará y enviará una factura de proveedor por el pendiente de facturar (${order.perBilled.toStringAsFixed(0)}% ya facturado).\n\n¿Continuar?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Facturar',
-              style: TextStyle(color: AppDesign.statusSubmitted),
-            ),
-          ),
-        ],
-      ),
-    );
-    if (confirm != true || !mounted) return;
+    // Regla de una sola cámara: liberar la cámara principal antes de navegar
+    _cameraActive = false;
+    try {
+      await _cameraController?.stop();
+      await _cameraController?.dispose();
+    } catch (_) {}
+    _cameraController = null;
+    if (mounted) setState(() {});
 
-    final ok = await provider.createInvoiceForOrder();
+    final result = await Navigator.pushNamed(
+      context,
+      '/pi-create',
+      arguments: {
+        'poName': order.id,
+        'supplier': order.supplier,
+        'supplierId': order.supplierId.isNotEmpty ? order.supplierId : order.supplier,
+        'warehouse': order.setWarehouse,
+        'costCenter': order.costCenter,
+      },
+    );
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          ok
-              ? '✅ Factura creada — orden al ${provider.currentOrder?.perBilled.toStringAsFixed(0) ?? 100}% facturado'
-              : '❌ ${provider.error}',
-        ),
-        backgroundColor: ok
-            ? AppDesign.statusSubmitted
-            : AppDesign.statusCancelled,
-      ),
-    );
+    // Refrescar el estado real de la orden tras facturar
+    if (result != null) {
+      await provider.refreshOrderStatus();
+      if (mounted) setState(() {});
+    }
   }
 
   /// Color según el estado real del ERP.
@@ -400,6 +391,18 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     final provider = context.read<PurchaseOrderProvider>();
     final order = provider.currentOrder;
     if (order == null || order.id == null) return;
+
+    // Regla de una sola cámara: liberar la cámara principal ANTES de que el
+    // escáner del PR pueda abrir la suya. Dos controladores de mobile_scanner
+    // compitiendo por la misma cámara causan un deadlock nativo (freeze/ANR).
+    _cameraActive = false;
+    try {
+      await _cameraController?.stop();
+      await _cameraController?.dispose();
+    } catch (_) {
+      // El controlador ya podía estar liberado tras el submit de la orden.
+    }
+    _cameraController = null;
 
     setState(() {
       _showPRForm = true;
@@ -495,7 +498,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     while (_prScanQueue.isNotEmpty) {
       final code = _prScanQueue.removeFirst();
       if (!mounted) break;
-      _processPRScan(code);
+      await _processPRScan(code);
       // Pausa corta para evitar doble-lectura del mismo código
       await Future.delayed(const Duration(milliseconds: 500));
     }
@@ -504,35 +507,59 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     if (mounted) setState(() {});
   }
 
-  void _processPRScan(String code) {
+  Future<void> _processPRScan(String code) async {
     if (code.trim().isEmpty) return;
     HapticFeedback.mediumImpact();
 
-    final qty = int.tryParse(_prQtyController.text.trim()) ?? 1;
+    final qty =
+        double.tryParse(_prQtyController.text.trim().replaceAll(',', '.')) ?? 1.0;
     final cleanCode = code.trim().toUpperCase();
 
     final existingIndex = _prItems.indexWhere(
       (i) => (i['item_code'] ?? '').toString().toUpperCase() == cleanCode,
     );
 
+    // LIFO: el producto recién escaneado siempre queda de primero en la pila.
     if (existingIndex >= 0) {
-      _prItems[existingIndex]['qty'] =
-          (_prItems[existingIndex]['qty'] ?? 0) + qty;
+      final updated = _prItems.removeAt(existingIndex);
+      updated['qty'] = ((updated['qty'] ?? 0) as num).toDouble() + qty;
+      _prItems.insert(0, updated);
     } else {
-      _prItems.add({
+      _prItems.insert(0, {
         'item_code': cleanCode,
         'item_name': cleanCode,
         'qty': qty,
         'received_qty': 0,
         'uom': '',
-        'rate': 0,
+        'rate': 0.0,
         'purchase_order_item': '',
       });
     }
 
     _prQtyController.text = '1';
     _prScanController.clear();
-    setState(() {});
+    if (mounted) setState(() {});
+
+    // Enriquecer el item con datos reales del ERP (nombre + UOM), sin crear items.
+    if (existingIndex < 0) {
+      try {
+        final provider = context.read<PurchaseOrderProvider>();
+        final item = await provider.erpNextService.fetchItemByCode(cleanCode);
+        if (item != null && mounted) {
+          setState(() {
+            for (final row in _prItems) {
+              if ((row['item_code'] ?? '').toString().toUpperCase() ==
+                  item.itemCode.toUpperCase()) {
+                row['item_name'] = item.itemName;
+                if (item.stockUom.isNotEmpty) row['uom'] = item.stockUom;
+              }
+            }
+          });
+        }
+      } catch (e) {
+        print('[PR] Error enriqueciendo item: $e');
+      }
+    }
   }
 
   Future<void> _savePR() async {
@@ -658,89 +685,36 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       final service = context.read<ErpNextService>();
       await service.submitPurchaseReceipt(_prSavedName);
 
-      // Notificar al provider de recepciones para que refresque su lista
+      // Notificar al provider de recepciones para que refresque su lista.
+      // Comportamiento igual al de la Orden de Compra: SnackBar de éxito y
+      // cerrar el formulario — sin diálogo modal que pueda quedar abierto
+      // con el doc ya enviado y los botones activos.
       if (mounted) {
         context.read<MaterialReceiptProvider>().fetchReceipts();
-        await showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            icon: const Icon(
-              Icons.check_circle,
-              color: AppDesign.statusSubmitted,
-              size: 48,
-            ),
-            title: const Text('Recepción Enviada'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _prSavedName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'La recepción de mercadería fue creada exitosamente en ERPNext.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  setState(() {
-                    _showPRForm = false;
-                    _prSaved = false;
-                    _prSavedName = '';
-                  });
-                  _linkedPRsLoaded = false;
-                  _loadLinkedPRs();
-                  // Refrescar estado de la orden (per_received cambió en el ERP)
-                  context.read<PurchaseOrderProvider>().refreshOrder();
-                },
-                child: const Text('Volver a PO'),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  final savedPrName = _prSavedName;
-                  setState(() {
-                    _showPRForm = false;
-                    _prSaved = false;
-                    _prSavedName = '';
-                  });
-                  _linkedPRsLoaded = false;
-                  _loadLinkedPRs();
-                  // Refrescar estado de la orden (per_received cambió en el ERP)
-                  context.read<PurchaseOrderProvider>().refreshOrder();
-                  final service = context.read<ErpNextService>();
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PurchaseReceiptDetailScreen(
-                        prName: savedPrName,
-                        erpNextService: service,
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.open_in_new, size: 16),
-                label: const Text('Ver Registro'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppDesign.tealIcon,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Recepción $_prSavedName enviada'),
+            backgroundColor: AppDesign.statusSubmitted,
           ),
         );
+        // Resetear y cerrar el formulario: el PR ya está submitted y no
+        // debe poder guardarse ni enviarse de nuevo.
+        // Liberar la cámara del PR (regla de una sola cámara).
+        try {
+          _prCameraController?.stop();
+          _prCameraController?.dispose();
+        } catch (_) {}
+        _prCameraController = null;
+        setState(() {
+          _showPRForm = false;
+          _prScannerActive = false;
+          _prSaved = false;
+          _prSavedName = '';
+        });
+        _linkedPRsLoaded = false;
+        _loadLinkedPRs();
+        // Refrescar estado de la orden (per_received cambió en el ERP)
+        context.read<PurchaseOrderProvider>().refreshOrder();
       }
     } catch (e) {
       _prError = 'Error enviando: $e';
@@ -750,7 +724,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   }
 
   void _closePRForm() {
-    _prCameraController?.stop();
+    try {
+      _prCameraController?.stop();
+      _prCameraController?.dispose();
+    } catch (_) {}
+    _prCameraController = null;
     setState(() {
       _showPRForm = false;
       _prCreationMode = false;
@@ -784,15 +762,17 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     try {
       final service = context.read<ErpNextService>();
       final prs = await service.listPurchaseReceiptsForPO(order.id!);
+      if (!mounted) return;
       setState(() {
         _linkedPRs = prs;
         _linkedPRsLoaded = true;
       });
     } catch (e) {
       print('[PR] Error loading linked PRs: $e');
+      if (!mounted) return;
       setState(() => _linkedPRsLoaded = true);
     }
-    setState(() => _linkedPRsLoading = false);
+    if (mounted) setState(() => _linkedPRsLoading = false);
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -1409,7 +1389,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                       width: 64,
                       child: TextField(
                         controller: _qtyController,
-                        keyboardType: TextInputType.number,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontSize: 16,
@@ -1460,6 +1440,40 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                         onSubmitted: (v) {
                           if (v.trim().isNotEmpty) _processScan(v);
                         },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Búsqueda escrita de productos
+                    GestureDetector(
+                      onTap: () async {
+                        final row = await showItemSearchDialog(
+                          context,
+                          provider.erpNextService,
+                          title: 'Buscar producto',
+                        );
+                        if (row == null || !mounted) return;
+                        final qty = double.tryParse(
+                              _qtyController.text.trim().replaceAll(',', '.'),
+                            ) ??
+                            1.0;
+                        await provider.addItemToOrderByCode(
+                          (row['name'] ?? '').toString(),
+                          quantity: qty,
+                        );
+                        _qtyController.text = '1';
+                      },
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppDesign.tealIcon,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.manage_search,
+                          color: Colors.white,
+                          size: 22,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -2599,7 +2613,8 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 width: 55,
                 child: TextField(
                   controller: _prQtyController,
-                  keyboardType: TextInputType.number,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontSize: 14,
@@ -2647,6 +2662,48 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                       _drainPRScanQueue();
                     }
                   },
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Búsqueda escrita de productos (solo items existentes del ERP)
+              GestureDetector(
+                onTap: () async {
+                  final poProvider = context.read<PurchaseOrderProvider>();
+                  final row = await showItemSearchDialog(
+                    context,
+                    poProvider.erpNextService,
+                    title: 'Buscar producto',
+                  );
+                  if (row == null || !mounted) return;
+                  final qty = double.tryParse(
+                        _prQtyController.text.trim().replaceAll(',', '.'),
+                      ) ??
+                      1.0;
+                  setState(() {
+                    _prItems.insert(0, {
+                      'item_code': (row['item_code'] ?? row['name']).toString(),
+                      'item_name': (row['item_name'] ?? '').toString(),
+                      'qty': qty,
+                      'received_qty': 0,
+                      'uom': (row['stock_uom'] ?? '').toString(),
+                      'rate': 0.0,
+                      'purchase_order_item': '',
+                    });
+                  });
+                  _prQtyController.text = '1';
+                },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppDesign.accent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.manage_search,
+                    color: Colors.white,
+                    size: 22,
+                  ),
                 ),
               ),
             ],
@@ -2768,8 +2825,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                             children: [
                               GestureDetector(
                                 onTap: () {
+                                  final step = _prStep(_prItems[index]);
                                   final newQty =
-                                      (_prItems[index]['qty'] ?? 0) - 1;
+                                      ((_prItems[index]['qty'] ?? 0) as num)
+                                          .toDouble() -
+                                          step;
                                   if (newQty <= 0) {
                                     setState(() => _prItems.removeAt(index));
                                   } else {
@@ -2794,15 +2854,38 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                                   ),
                                 ),
                               ),
-                              Container(
-                                width: 36,
-                                alignment: Alignment.center,
-                                child: Text(
-                                  '${_prItems[index]["qty"]}',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppDesign.navy,
+                              GestureDetector(
+                                // Tap en la cantidad: edición exacta
+                                // (decimales si la UOM del producto lo permite)
+                                onTap: () async {
+                                  final allows = _prAllowsDecimals(
+                                      _prItems[index]);
+                                  final newQty = await showQtyInputDialog(
+                                    context,
+                                    current: ((_prItems[index]['qty'] ?? 0)
+                                            as num)
+                                        .toDouble(),
+                                    allowsDecimals: allows,
+                                    uom: (_prItems[index]['uom'] ?? '')
+                                        .toString(),
+                                  );
+                                  if (newQty != null) {
+                                    setState(() =>
+                                        _prItems[index]['qty'] = newQty);
+                                  }
+                                },
+                                child: Container(
+                                  width: 36,
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    fmtQty(
+                                        ((_prItems[index]['qty'] ?? 0) as num)
+                                            .toDouble()),
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppDesign.navy,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2810,7 +2893,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                                 onTap: () {
                                   setState(
                                     () => _prItems[index]['qty'] =
-                                        (_prItems[index]['qty'] ?? 0) + 1,
+                                        ((_prItems[index]['qty'] ?? 0) as num)
+                                                .toDouble() +
+                                            _prStep(_prItems[index]),
                                   );
                                 },
                                 child: Container(
@@ -2934,6 +3019,18 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
     );
   }
 
+  /// true si la UOM del item del PR admite decimales.
+  bool _prAllowsDecimals(Map<String, dynamic> row) {
+    final provider = context.read<PurchaseOrderProvider>();
+    return provider.erpNextService
+        .uomAllowsDecimals((row['uom'] ?? '').toString());
+  }
+
+  /// Paso de los botones +/- del PR: 0.5 si admite decimales, 1 si no.
+  double _prStep(Map<String, dynamic> row) {
+    return _prAllowsDecimals(row) ? 0.5 : 1.0;
+  }
+
   Widget _buildItemCard(PurchaseOrderItem item, int index) {
     final provider = context.read<PurchaseOrderProvider>();
     final readOnly = provider.isSubmitted;
@@ -2980,7 +3077,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                '${item.qty}',
+                fmtQty(item.qty),
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -2993,7 +3090,11 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 GestureDetector(
-                  onTap: () => provider.updateItemQty(index, item.qty - 1),
+                  onTap: () {
+                    final uom = provider.itemsByCode[item.itemCode.toUpperCase()]?.stockUom ?? '';
+                    final step = provider.erpNextService.uomAllowsDecimals(uom) ? 0.5 : 1.0;
+                    provider.updateItemQty(index, item.qty - step);
+                  },
                   child: Container(
                     width: 28,
                     height: 28,
@@ -3008,20 +3109,40 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     ),
                   ),
                 ),
-                Container(
-                  width: 40,
-                  alignment: Alignment.center,
-                  child: Text(
-                    '${item.qty}',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppDesign.navy,
+                GestureDetector(
+                  // Tap en la cantidad: edición exacta (decimales si la UOM lo permite)
+                  onTap: () async {
+                    final uom = provider.itemsByCode[item.itemCode.toUpperCase()]?.stockUom ?? '';
+                    final allows = provider.erpNextService.uomAllowsDecimals(uom);
+                    final newQty = await showQtyInputDialog(
+                      context,
+                      current: item.qty,
+                      allowsDecimals: allows,
+                      uom: uom,
+                    );
+                    if (newQty != null) {
+                      provider.updateItemQty(index, newQty);
+                    }
+                  },
+                  child: Container(
+                    width: 40,
+                    alignment: Alignment.center,
+                    child: Text(
+                      fmtQty(item.qty),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppDesign.navy,
+                      ),
                     ),
                   ),
                 ),
                 GestureDetector(
-                  onTap: () => provider.updateItemQty(index, item.qty + 1),
+                  onTap: () {
+                    final uom = provider.itemsByCode[item.itemCode.toUpperCase()]?.stockUom ?? '';
+                    final step = provider.erpNextService.uomAllowsDecimals(uom) ? 0.5 : 1.0;
+                    provider.updateItemQty(index, item.qty + step);
+                  },
                   child: Container(
                     width: 28,
                     height: 28,

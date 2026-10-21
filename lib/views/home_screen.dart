@@ -3,13 +3,47 @@ import 'package:provider/provider.dart';
 import '../providers/inventory_provider.dart';
 
 /// Home screen — diseño moderno tipo dashboard con stats + módulos cards.
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
 
   // ─── Colores del theme ───
   static const _navy = Color(0xFF1B2A4A);
   static const _accent = Color(0xFF26C6DA);
   static const _bg = Color(0xFFF2F4F8);
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-conexión al arrancar: si hay config guardada (Recordarme),
+    // conecta solo para que los módulos tengan catálogos y series desde el inicio.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _autoConnect());
+  }
+
+  Future<void> _autoConnect() async {
+    final provider = context.read<InventoryProvider>();
+    if (provider.isConnected || provider.isLoadingItems) return;
+    try {
+      final config = await provider.loadSavedConfig();
+      final url = config['url'] ?? '';
+      final user = config['username'] ?? '';
+      final pass = config['password'] ?? '';
+      if (url.isEmpty || user.isEmpty || pass.isEmpty) return;
+      await provider.connectToErpNext(
+        url: url,
+        username: user,
+        password: pass,
+        rememberMe: true,
+      );
+    } catch (_) {
+      // Sin conexión guardada o fallo de red: el usuario conecta manual desde Config.
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -98,6 +132,26 @@ class HomeScreen extends StatelessWidget {
                             onTap: () => Navigator.pushNamed(context, '/mr-list'),
                           ),
                         ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    // Row 2.5: Facturas de Compra
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _ModuleCard(
+                            title: 'Facturas de\nCompra',
+                            icon: Icons.receipt_long_outlined,
+                            bgColor: const Color(0xFFE3F2FD),
+                            iconBgColor: const Color(0xFFBBDEFB),
+                            iconColor: const Color(0xFF1565C0),
+                            onTap: () => Navigator.pushNamed(context, '/pi-list'),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        const Expanded(child: SizedBox()),
                       ],
                     ),
 
@@ -497,9 +551,8 @@ class _ModuleCard extends StatelessWidget {
     required this.iconBgColor,
     required this.iconColor,
     required this.onTap,
-    this.enabled = true,
-    this.badge,
-  });
+  }) : enabled = true,
+       badge = null;
 
   @override
   Widget build(BuildContext context) {

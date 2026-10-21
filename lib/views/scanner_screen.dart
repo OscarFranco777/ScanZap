@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../providers/inventory_provider.dart';
 import '../models/inventory_row.dart';
 import '../theme/app_design.dart';
+import 'ui_helpers.dart';
 
 /// Terminal de escaneo de código de barras con cámara del dispositivo.
 /// Optimizada para dispositivos de gama baja/media.
@@ -114,9 +115,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
     _qtyController.text = '1';
   }
 
-  int _getQty() {
-    final parsed = int.tryParse(_qtyController.text.trim());
-    return (parsed != null && parsed > 0) ? parsed : 1;
+  double _getQty() {
+    final parsed =
+        double.tryParse(_qtyController.text.trim().replaceAll(',', '.'));
+    return (parsed != null && parsed > 0) ? parsed : 1.0;
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -219,7 +221,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
               const SizedBox(height: 12),
               TextField(
                 controller: qtyCtrl,
-                keyboardType: TextInputType.number,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(
                   labelText: 'Cantidad',
                   hintText: '1',
@@ -237,8 +239,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              final qty = int.tryParse(qtyCtrl.text.trim()) ?? 1;
-              _qtyController.text = '$qty';
+              final qty =
+                  double.tryParse(qtyCtrl.text.trim().replaceAll(',', '.')) ?? 1.0;
+              _qtyController.text = fmtQty(qty);
               _processScan(_manualController.text);
               _manualController.clear();
             },
@@ -382,7 +385,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                               width: 70,
                               child: TextField(
                                 controller: _qtyController,
-                                keyboardType: TextInputType.number,
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
                                   fontSize: 18,
@@ -695,7 +698,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  onPressed: () => provider.decrementQuantity(row.itemCode),
+                  onPressed: () => provider.decrementQuantity(row.itemCode,
+                      step: provider.erpNextService
+                              .uomAllowsDecimals(row.stockUom)
+                          ? 0.5
+                          : 1.0),
                   icon: const Icon(Icons.remove_circle_outline, size: 20),
                   color: Colors.red,
                   padding: const EdgeInsets.all(2),
@@ -704,19 +711,38 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     minHeight: 28,
                   ),
                 ),
-                Container(
-                  width: 36,
-                  alignment: Alignment.center,
-                  child: Text(
-                    '${row.quantity}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+                InkWell(
+                  onTap: () async {
+                    final allows = provider.erpNextService
+                        .uomAllowsDecimals(row.stockUom);
+                    final newQty = await showQtyInputDialog(
+                      context,
+                      current: row.quantity,
+                      allowsDecimals: allows,
+                      uom: row.stockUom,
+                    );
+                    if (newQty != null) {
+                      provider.updateQuantity(row.itemCode, newQty);
+                    }
+                  },
+                  child: Container(
+                    width: 36,
+                    alignment: Alignment.center,
+                    child: Text(
+                      fmtQty(row.quantity),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
                 IconButton(
-                  onPressed: () => provider.incrementQuantity(row.itemCode),
+                  onPressed: () => provider.incrementQuantity(row.itemCode,
+                      step: provider.erpNextService
+                              .uomAllowsDecimals(row.stockUom)
+                          ? 0.5
+                          : 1.0),
                   icon: const Icon(Icons.add_circle_outline, size: 20),
                   color: Colors.green,
                   padding: const EdgeInsets.all(2),

@@ -44,8 +44,8 @@ class InventoryProvider with ChangeNotifier {
       _sessionItems.values.toList()
         ..sort((a, b) => b.scannedAt.compareTo(a.scannedAt));
 
-  int get totalUnitsScanned =>
-      _sessionItems.values.fold(0, (sum, row) => sum + row.quantity);
+  double get totalUnitsScanned =>
+      _sessionItems.values.fold(0.0, (sum, row) => sum + row.quantity);
 
   double get totalInventoryValue =>
       _sessionItems.values.fold(0.0, (sum, row) => sum + row.totalCost);
@@ -123,6 +123,11 @@ class InventoryProvider with ChangeNotifier {
       print('[Provider] Items indexados: ${itemsByCode.length} entradas');
       print('[Provider] Barcodes secundarios: ${barcodesToItemCode.length} entradas');
 
+      // Config de UOMs (cuáles admiten decimales) — para libras, kg, etc.
+      try {
+        await erpNextService.ensureUomSettingsLoaded();
+      } catch (_) {}
+
       isConnected = true;
       isLoadingItems = false;
 
@@ -197,7 +202,7 @@ class InventoryProvider with ChangeNotifier {
   // ESCANEO Y CONTEO
   // ══════════════════════════════════════════════════════════════
 
-  Future<bool> scanItem(String code, {int quantity = 1}) async {
+  Future<bool> scanItem(String code, {double quantity = 1}) async {
     final cleanCode = code.trim();
     if (cleanCode.isEmpty) return false;
 
@@ -284,7 +289,7 @@ class InventoryProvider with ChangeNotifier {
     return true;
   }
 
-  void updateQuantity(String itemCode, int newQty) {
+  void updateQuantity(String itemCode, double newQty) {
     final key = itemCode.toUpperCase();
     if (_sessionItems.containsKey(key)) {
       _sessionItems[key]!.setQuantity(newQty);
@@ -295,18 +300,18 @@ class InventoryProvider with ChangeNotifier {
     }
   }
 
-  void incrementQuantity(String itemCode) {
+  void incrementQuantity(String itemCode, {double step = 1}) {
     final key = itemCode.toUpperCase();
     if (_sessionItems.containsKey(key)) {
-      _sessionItems[key]!.increment();
+      _sessionItems[key]!.increment(step: step);
       notifyListeners();
     }
   }
 
-  void decrementQuantity(String itemCode) {
+  void decrementQuantity(String itemCode, {double step = 1}) {
     final key = itemCode.toUpperCase();
     if (_sessionItems.containsKey(key)) {
-      _sessionItems[key]!.decrement();
+      _sessionItems[key]!.decrement(step: step);
       if (_sessionItems[key]!.quantity == 0) {
         _sessionItems.remove(key);
       }
@@ -368,7 +373,7 @@ class InventoryProvider with ChangeNotifier {
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row))
           .value = TextCellValue(item.stockUom);
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row))
-          .value = IntCellValue(item.quantity);
+          .value = DoubleCellValue(item.quantity);
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: row))
           .value = DoubleCellValue(item.unitCost);
       sheet.cell(CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: row))
@@ -381,7 +386,7 @@ class InventoryProvider with ChangeNotifier {
     sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row))
         .value = TextCellValue('TOTAL');
     sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row))
-        .value = IntCellValue(totalUnitsScanned);
+        .value = DoubleCellValue(totalUnitsScanned);
     sheet.cell(CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: row))
         .value = DoubleCellValue(totalInventoryValue);
 

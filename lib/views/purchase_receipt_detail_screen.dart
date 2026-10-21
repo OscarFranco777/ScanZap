@@ -192,6 +192,40 @@ class _PurchaseReceiptDetailScreenState
             ),
           ),
 
+          // ─── Botón Facturar (abre el registro de Factura de Compra) ───
+          // Desde la recepción: items precargados de lo recibido y el tilde
+          // "Actualizar inventario" DESMARCADO (el stock ya lo movió la PR).
+          if (docstatus == 1 &&
+              status != 'Cancelled' &&
+              status != 'Closed' &&
+              ((data['per_billed'] is num ? (data['per_billed'] as num).toDouble() : 0.0) < 100)) ...[
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: SizedBox(
+                height: 48,
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _facturarDesdeRecepcion(context, data),
+                  icon: const Icon(Icons.receipt_long_outlined, size: 20),
+                  label: const Text(
+                    'Facturar',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppDesign.blueIcon,
+                    foregroundColor: Colors.white,
+                    elevation: 4,
+                    shadowColor: AppDesign.blueIcon.withValues(alpha: 0.4),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+
           const SizedBox(height: 12),
 
           // ─── Info general ───
@@ -282,6 +316,23 @@ class _PurchaseReceiptDetailScreenState
           const SizedBox(height: 24),
         ],
       ),
+    );
+  }
+
+  /// Abre el Registro de Factura de Compra con los datos de esta recepción
+  /// precargados (items pendientes de facturar; sin actualizar inventario).
+  Future<void> _facturarDesdeRecepcion(
+      BuildContext context, Map<String, dynamic> data) async {
+    await Navigator.pushNamed(
+      context,
+      '/pi-create',
+      arguments: {
+        'receiptName': widget.prName,
+        'supplier': data['supplier'] ?? '',
+        'supplierId': data['supplier'] ?? '',
+        'warehouse': data['set_warehouse'] ?? '',
+        'costCenter': data['cost_center'] ?? '',
+      },
     );
   }
 

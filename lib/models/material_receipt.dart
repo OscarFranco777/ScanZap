@@ -12,6 +12,8 @@ class MaterialReceipt {
   String erpStatus; // Estado REAL del ERP (To Bill, Partly Billed, Completed...)
   double perBilled; // % facturado según el ERP
   double totalAmount;
+  double netTotal; // net_total del ERP (cuando el doc ya existe)
+  double taxesTotal; // total_taxes_and_charges del ERP
   DateTime postingDate;
   DateTime createdAt;
 
@@ -28,13 +30,23 @@ class MaterialReceipt {
     this.erpStatus = '',
     this.perBilled = 0.0,
     this.totalAmount = 0.0,
+    this.netTotal = 0.0,
+    this.taxesTotal = 0.0,
     DateTime? postingDate,
     DateTime? createdAt,
   })  : items = items ?? [],
         postingDate = postingDate ?? DateTime.now(),
         createdAt = createdAt ?? DateTime.now();
 
-  int get totalQty => items.fold(0, (sum, item) => sum + item.qty);
+  double get totalQty => items.fold(0.0, (sum, item) => sum + item.qty);
+
+  /// Subtotal en vivo: Σ (monto neto del item, o qty × precio de lista
+  /// si aún no hay monto). Se recalcula al editar items.
+  double get subtotal => items.fold(
+      0.0,
+      (sum, item) =>
+          sum +
+          (item.netAmount > 0 ? item.netAmount : item.qty * item.priceListRate));
 
   /// Convierte a Map para enviar a ERPNext (Purchase Receipt).
   Map<String, dynamic> toMap() {
@@ -85,6 +97,12 @@ class MaterialReceipt {
       erpStatus: (data['status'] ?? '').toString(),
       perBilled: (data['per_billed'] is num) ? (data['per_billed'] as num).toDouble() : 0.0,
       totalAmount: (total is num) ? total.toDouble() : 0.0,
+      netTotal: (data['net_total'] is num)
+          ? (data['net_total'] as num).toDouble()
+          : 0.0,
+      taxesTotal: (data['total_taxes_and_charges'] is num)
+          ? (data['total_taxes_and_charges'] as num).toDouble()
+          : 0.0,
       postingDate: DateTime.tryParse(data['posting_date'] ?? '') ?? DateTime.now(),
     );
   }
@@ -101,7 +119,7 @@ class MaterialReceipt {
 class MaterialReceiptItem {
   String itemCode;
   String itemName;
-  int qty;
+  double qty;
   String uom;
   String warehouse;
   String purchaseOrderItem; // ID del ítem en la PO (para vinculación)
@@ -140,7 +158,7 @@ class MaterialReceiptItem {
     return MaterialReceiptItem(
       itemCode: data['item_code'] ?? '',
       itemName: data['item_name'] ?? '',
-      qty: (data['qty'] ?? 0).toInt(),
+      qty: (data['qty'] ?? 0).toDouble(),
       uom: data['uom'] ?? '',
       warehouse: data['warehouse'] ?? '',
       purchaseOrderItem: data['purchase_order_item'] ?? '',

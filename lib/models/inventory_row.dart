@@ -5,7 +5,7 @@ class InventoryRow {
   final String displayCode;   // Código para mostrar (barcode original con ceros)
   String itemName;            // Nombre del producto (de ERPNext)
   String stockUom;            // Unidad de medida
-  int quantity;               // Cantidad contada (escaneada)
+  double quantity;            // Cantidad contada (escaneada, admite decimales si la UOM lo permite)
   double unitCost;            // Costo unitario (del Excel)
   bool hasCost;               // Si se encontró costo en el Excel
   DateTime scannedAt;         // Cuándo se escaneó por primera vez
@@ -25,23 +25,24 @@ class InventoryRow {
   /// Costo total de esta línea = cantidad × costo unitario
   double get totalCost => quantity * unitCost;
 
-  /// Incrementa la cantidad en 1 (cuando se vuelve a escanear)
-  void increment() {
-    quantity += 1;
+  /// Incrementa la cantidad (cuando se vuelve a escanear)
+  void increment({double step = 1}) {
+    quantity += step;
   }
 
   /// Decrementa la cantidad (botón -), mínimo 0
-  void decrement() {
-    if (quantity > 0) quantity -= 1;
+  void decrement({double step = 1}) {
+    final newQty = quantity - step;
+    quantity = newQty < 0 ? 0 : newQty;
   }
 
   /// Suma N unidades (escaneo con cantidad personalizada)
-  void addQuantity(int qty) {
+  void addQuantity(double qty) {
     quantity += qty < 0 ? 0 : qty;
   }
 
   /// Actualiza la cantidad directamente (entrada manual)
-  void setQuantity(int qty) {
+  void setQuantity(double qty) {
     quantity = qty < 0 ? 0 : qty;
   }
 

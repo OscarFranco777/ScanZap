@@ -504,6 +504,79 @@ class ErpNextService {
     }
   }
 
+  /// Busca items en ERPNext por código o nombre (búsqueda escrita manual).
+  /// Devuelve filas con name, item_code, item_name y stock_uom.
+  Future<List<Map<String, dynamic>>> searchItems(String query,
+      {int limit = 20}) async {
+    final q = query.trim();
+    if (q.isEmpty) return [];
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Item',
+          'fields': '["name","item_code","item_name","stock_uom"]',
+          'or_filters':
+              '[["item_code","like","%$q%"],["item_name","like","%$q%"]]',
+          'limit_page_length': limit,
+          'order_by': 'item_code asc',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('[Service] searchItems error: $e');
+      return [];
+    }
+  }
+
+  // ─── UOM: permite decimales? (ERPNext: UOM.must_be_whole_number) ───
+  // Cache: uom -> true si es "must be whole number" (NO admite decimales).
+  final Map<String, bool> _uomWholeNumber = {};
+  Future<void>? _uomSettingsFuture;
+
+  /// Carga la config de todas las UOMs una sola vez (llamado al cargar catálogos).
+  Future<void> ensureUomSettingsLoaded() {
+    _uomSettingsFuture ??= _loadUomSettings();
+    return _uomSettingsFuture!;
+  }
+
+  Future<void> _loadUomSettings() async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'UOM',
+          'fields': '["name","must_be_whole_number"]',
+          'limit_page_length': 0,
+        },
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        for (final row in data) {
+          final name = (row['name'] ?? '').toString().toUpperCase();
+          if (name.isEmpty) continue;
+          _uomWholeNumber[name] = (row['must_be_whole_number'] ?? 0) == 1;
+        }
+        print('[Service] UOM settings cargadas: ${_uomWholeNumber.length}');
+      }
+    } catch (e) {
+      print('[Service] Error cargando UOM settings: $e');
+    }
+  }
+
+  /// true si la UOM admite cantidades decimales (ej: Libra).
+  /// Si la UOM no está en el cache, asume que SÍ admite decimales.
+  bool uomAllowsDecimals(String? uom) {
+    if (uom == null || uom.trim().isEmpty) return true;
+    final whole = _uomWholeNumber[uom.trim().toUpperCase()];
+    return whole != true;
+  }
+
   // ══════════════════════════════════════════════════════════════
   // PROVEEDORES (para Órdenes de Compra)
   // ══════════════════════════════════════════════════════════════
@@ -678,18 +751,27 @@ class ErpNextService {
   /// Crea un Purchase Invoice como borrador desde una Purchase Order enviada.
   /// Los items deben traer item_code, qty, rate, purchase_order_item (po_detail)
   /// y warehouse para que el ERP vincule la factura con la orden.
+  /// [updateStock] en true hace que la factura misma actualice el inventario
+  /// (flujo orden → factura sin recepción previa).
   Future<Map<String, dynamic>> createPurchaseInvoiceFromPO({
     required String purchaseOrder,
     required String supplier,
     required List<Map<String, dynamic>> items,
     String? costCenter,
     String? setWarehouse,
+    String? billNo,
+    String? namingSeries,
+    bool updateStock = true,
   }) async {
     final doc = {
       'doctype': 'Purchase Invoice',
       'supplier': supplier,
       'posting_date': DateTime.now().toIso8601String().substring(0, 10),
       'bill_date': DateTime.now().toIso8601String().substring(0, 10),
+      'update_stock': updateStock,
+      if (billNo != null && billNo.isNotEmpty) 'bill_no': billNo,
+      if (namingSeries != null && namingSeries.isNotEmpty)
+        'naming_series': namingSeries,
       if (setWarehouse != null && setWarehouse.isNotEmpty)
         'set_warehouse': setWarehouse,
       if (costCenter != null && costCenter.isNotEmpty)
@@ -925,18 +1007,27 @@ class ErpNextService {
   /// Crea un Purchase Invoice como borrador desde un Purchase Receipt enviado.
   /// Los items deben traer item_code, qty, rate, name (pr_detail) y warehouse
   /// para que el ERP vincule la factura con la recepción.
+  /// [updateStock] en false porque el stock ya lo actualizó la recepción —
+  /// marcarlo duplicaría el inventario.
   Future<Map<String, dynamic>> createPurchaseInvoiceFromReceipt({
     required String purchaseReceipt,
     required String supplier,
     required List<Map<String, dynamic>> items,
     String? costCenter,
     String? setWarehouse,
+    String? billNo,
+    String? namingSeries,
+    bool updateStock = false,
   }) async {
     final doc = {
       'doctype': 'Purchase Invoice',
       'supplier': supplier,
       'posting_date': DateTime.now().toIso8601String().substring(0, 10),
       'bill_date': DateTime.now().toIso8601String().substring(0, 10),
+      'update_stock': updateStock,
+      if (billNo != null && billNo.isNotEmpty) 'bill_no': billNo,
+      if (namingSeries != null && namingSeries.isNotEmpty)
+        'naming_series': namingSeries,
       if (setWarehouse != null && setWarehouse.isNotEmpty)
         'set_warehouse': setWarehouse,
       if (costCenter != null && costCenter.isNotEmpty)
@@ -966,6 +1057,139 @@ class ErpNextService {
       return response.data['data'] ?? {};
     }
     throw Exception('Error creando Purchase Invoice: ${response.data}');
+  }
+
+  /// Crea un Purchase Invoice como borrador SIN orden ni recepción vinculada
+  /// (creación directa). Con update_stock en true, la factura misma mueve stock.
+  Future<Map<String, dynamic>> createDirectPurchaseInvoice({
+    required String supplier,
+    required List<Map<String, dynamic>> items,
+    String? billNo,
+    String? namingSeries,
+    String? setWarehouse,
+    String? costCenter,
+    bool updateStock = true,
+  }) async {
+    final doc = {
+      'doctype': 'Purchase Invoice',
+      'supplier': supplier,
+      'posting_date': DateTime.now().toIso8601String().substring(0, 10),
+      'bill_date': DateTime.now().toIso8601String().substring(0, 10),
+      'update_stock': updateStock,
+      if (billNo != null && billNo.isNotEmpty) 'bill_no': billNo,
+      if (namingSeries != null && namingSeries.isNotEmpty)
+        'naming_series': namingSeries,
+      if (setWarehouse != null && setWarehouse.isNotEmpty)
+        'set_warehouse': setWarehouse,
+      if (costCenter != null && costCenter.isNotEmpty)
+        'cost_center': costCenter,
+      'items': items
+          .map(
+            (item) => {
+              'doctype': 'Purchase Invoice Item',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              'rate': item['rate'] ?? 0,
+              'warehouse': item['warehouse'] ?? setWarehouse ?? '',
+              if (_validUom(item['uom'])) 'uom': item['uom'],
+            },
+          )
+          .toList(),
+    };
+
+    final response = await _dio.post(
+      '$baseUrl/api/resource/Purchase%20Invoice',
+      data: doc,
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error creando Purchase Invoice: ${response.data}');
+  }
+
+  /// Actualiza un Purchase Invoice borrador existente (items + bill_no).
+  Future<Map<String, dynamic>> updatePurchaseInvoice({
+    required String name,
+    required List<Map<String, dynamic>> items,
+    String? billNo,
+    bool? updateStock,
+  }) async {
+    final doc = {
+      if (billNo != null) 'bill_no': billNo,
+      if (updateStock != null) 'update_stock': updateStock,
+      'items': items
+          .map(
+            (item) => {
+              'doctype': 'Purchase Invoice Item',
+              'item_code': item['item_code'],
+              'qty': item['qty'],
+              'rate': item['rate'] ?? 0,
+              'warehouse': item['warehouse'] ?? '',
+              if (item['purchase_order'] != null)
+                'purchase_order': item['purchase_order'],
+              if (item['po_detail'] != null) 'po_detail': item['po_detail'],
+              if (item['purchase_receipt'] != null)
+                'purchase_receipt': item['purchase_receipt'],
+              if (item['pr_detail'] != null) 'pr_detail': item['pr_detail'],
+              if (_validUom(item['uom'])) 'uom': item['uom'],
+            },
+          )
+          .toList(),
+    };
+
+    final response = await _dio.put(
+      '$baseUrl/api/resource/Purchase%20Invoice/${Uri.encodeComponent(name)}',
+      data: doc,
+    );
+
+    if (response.statusCode == 200) {
+      return response.data['data'] ?? {};
+    }
+    throw Exception('Error actualizando Purchase Invoice: ${response.data}');
+  }
+
+  /// Obtiene un Purchase Invoice por nombre.
+  Future<Map<String, dynamic>?> getPurchaseInvoice(String name) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Invoice/${Uri.encodeComponent(name)}',
+      );
+      if (response.statusCode == 200) {
+        return response.data?['data'];
+      }
+      return null;
+    } catch (e) {
+      print('[Service] getPurchaseInvoice error: $e');
+      return null;
+    }
+  }
+
+  /// Lista Purchase Invoices con filtros. Trae bill_no y el estado real del ERP.
+  Future<List<Map<String, dynamic>>> listPurchaseInvoices({
+    int limit = 50,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Purchase Invoice',
+          'fields':
+              '["name","supplier","posting_date","docstatus","grand_total","status","bill_no","update_stock"]',
+          'order_by': 'creation desc',
+          'limit_page_length': limit,
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data?['message'] ?? [];
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('[Service] listPurchaseInvoices error: $e');
+      return [];
+    }
   }
 
   /// Lista Purchase Orders enviadas (docstatus=1) para crear recepción desde PO.

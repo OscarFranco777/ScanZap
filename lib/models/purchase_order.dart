@@ -37,7 +37,7 @@ class PurchaseOrder {
   double get total => items.fold(0.0, (sum, item) => sum + item.total);
 
   /// Cantidad total de items.
-  int get totalQty => items.fold(0, (sum, item) => sum + item.qty);
+  double get totalQty => items.fold(0.0, (sum, item) => sum + item.qty);
 
   // ─── Helpers de ciclo de vida (basados en el estado que devuelve el ERP) ───
 
@@ -105,7 +105,7 @@ class PurchaseOrder {
 class PurchaseOrderItem {
   String itemCode;
   String itemName;
-  int qty;
+  double qty;
   double rate;
 
   PurchaseOrderItem({
@@ -129,7 +129,7 @@ class PurchaseOrderItem {
     return PurchaseOrderItem(
       itemCode: data['item_code'] ?? '',
       itemName: data['item_name'] ?? '',
-      qty: (data['qty'] ?? 0).toInt(),
+      qty: (data['qty'] ?? 0).toDouble(),
       rate: (data['rate'] ?? 0).toDouble(),
     );
   }

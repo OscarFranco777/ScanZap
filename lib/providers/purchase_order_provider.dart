@@ -70,6 +70,8 @@ class PurchaseOrderProvider with ChangeNotifier {
         erpNextService.fetchWarehouses(),
         erpNextService.fetchCostCenters(),
         erpNextService.fetchNamingSeries('Purchase Order'),
+        // Config de UOMs (cuáles admiten decimales) — para libras, kg, etc.
+        erpNextService.ensureUomSettingsLoaded(),
       ]);
       warehouses = List<Map<String, dynamic>>.from(results[0] as List);
       costCenters = List<Map<String, dynamic>>.from(results[1] as List);
@@ -129,9 +131,64 @@ class PurchaseOrderProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Agrega un item a la orden por código, SIN crear items nuevos
+  /// (usado por la búsqueda manual: solo items existentes del ERP).
+  Future<bool> addItemToOrderByCode(String code, {double quantity = 1}) async {
+    if (currentOrder == null) return false;
+
+    final cleanCode = code.trim();
+    if (cleanCode.isEmpty) return false;
+
+    ItemModel? item = itemsByCode[cleanCode.toUpperCase()];
+    if (item == null) {
+      final stripped = cleanCode.replaceFirst(RegExp(r'^0+'), '');
+      item = itemsByCode[stripped.toUpperCase()];
+    }
+    if (item == null) {
+      try {
+        item = await erpNextService.fetchItemByCode(cleanCode);
+        if (item != null) {
+          itemsByCode[item.itemCode.toUpperCase()] = item;
+        }
+      } catch (e) {
+        print('[PO] Error fetch item: $e');
+      }
+    }
+
+    if (item == null) {
+      lastScanMessage = '❌ Item "$cleanCode" no encontrado en ERPNext';
+      lastScanWasError = true;
+      notifyListeners();
+      return false;
+    }
+
+    final existingIndex = currentOrder!.items.indexWhere(
+      (i) => i.itemCode.toUpperCase() == item!.itemCode.toUpperCase(),
+    );
+    if (existingIndex >= 0) {
+      // LIFO: lo recién agregado sube al tope con su cantidad acumulada
+      final updated = currentOrder!.items.removeAt(existingIndex);
+      updated.qty += quantity;
+      currentOrder!.items.insert(0, updated);
+      lastScanMessage = '✅ ${item.itemName} — qty: ${updated.qty}';
+    } else {
+      // LIFO: lo recién agregado queda de primero
+      currentOrder!.items.insert(0, PurchaseOrderItem(
+        itemCode: item.itemCode,
+        itemName: item.itemName,
+        qty: quantity,
+      ));
+      lastScanMessage = '✅ Nuevo: ${item.itemName} — ${quantity}uds';
+    }
+
+    lastScanWasError = false;
+    notifyListeners();
+    return true;
+  }
+
   /// Agrega un item escaneado a la orden actual.
   /// Si el item no existe en ERPNext, lo crea automáticamente.
-  Future<bool> scanItemToOrder(String code, {int quantity = 1}) async {
+  Future<bool> scanItemToOrder(String code, {double quantity = 1}) async {
     if (currentOrder == null) return false;
 
     final cleanCode = code.trim();
@@ -192,10 +249,14 @@ class PurchaseOrderProvider with ChangeNotifier {
     );
 
     if (existingIndex >= 0) {
-      currentOrder!.items[existingIndex].qty += quantity;
-      lastScanMessage = '✅ ${item.itemName} — qty: ${currentOrder!.items[existingIndex].qty}';
+      // LIFO: lo recién escaneado sube al tope con su cantidad acumulada
+      final updated = currentOrder!.items.removeAt(existingIndex);
+      updated.qty += quantity;
+      currentOrder!.items.insert(0, updated);
+      lastScanMessage = '✅ ${item.itemName} — qty: ${updated.qty}';
     } else {
-      currentOrder!.items.add(PurchaseOrderItem(
+      // LIFO: lo recién escaneado queda de primero
+      currentOrder!.items.insert(0, PurchaseOrderItem(
         itemCode: item.itemCode,
         itemName: item.itemName,
         qty: quantity,
@@ -209,7 +270,7 @@ class PurchaseOrderProvider with ChangeNotifier {
   }
 
   /// Actualiza la cantidad de un item.
-  void updateItemQty(int index, int newQty) {
+  void updateItemQty(int index, double newQty) {
     if (currentOrder == null) return;
     if (index < 0 || index >= currentOrder!.items.length) return;
 
@@ -472,6 +533,22 @@ class PurchaseOrderProvider with ChangeNotifier {
       isLoading = false;
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Refresca el estado real de la orden actual desde el ERP
+  /// (status, per_billed, per_received — el servidor es la fuente de verdad).
+  Future<void> refreshOrderStatus() async {
+    final order = currentOrder;
+    if (order == null || order.id == null) return;
+    try {
+      final statusData = await erpNextService.refreshPurchaseOrderStatus(order.id!);
+      order.erpStatus = (statusData['status'] ?? '').toString();
+      order.perBilled = (statusData['per_billed'] ?? 0).toDouble();
+      order.perReceived = (statusData['per_received'] ?? 0).toDouble();
+      notifyListeners();
+    } catch (e) {
+      print('[PO] refreshOrderStatus error: $e');
     }
   }
 

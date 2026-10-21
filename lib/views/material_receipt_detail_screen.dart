@@ -8,6 +8,7 @@ import '../providers/inventory_provider.dart';
 import '../providers/material_receipt_provider.dart';
 import '../models/material_receipt.dart';
 import '../theme/app_design.dart';
+import 'ui_helpers.dart';
 
 /// Pantalla de creación y detalle de Recepción de Mercadería.
 /// Incluye escáner de cámara y entrada manual.
@@ -155,7 +156,7 @@ class _MaterialReceiptDetailScreenState
       HapticFeedback.mediumImpact();
       try {
         final provider = context.read<MaterialReceiptProvider>();
-        final qty = int.tryParse(_qtyController.text.trim()) ?? 1;
+        final qty = double.tryParse(_qtyController.text.trim().replaceAll(',', '.')) ?? 1.0;
         await provider.scanItemToReceipt(code, quantity: qty);
         _qtyController.text = '1';
         _scanController.clear();
@@ -813,6 +814,12 @@ class _MaterialReceiptDetailScreenState
     final provider = context.watch<MaterialReceiptProvider>();
     final receipt = provider.currentReceipt;
 
+    // Moneda de la company (fallback: $)
+    final inventoryProvider = context.read<InventoryProvider>();
+    final currency = inventoryProvider.companyCurrency.isNotEmpty
+        ? inventoryProvider.companyCurrency
+        : "\$";
+
     if (receipt == null) {
       return AppDesign.emptyState(
         icon: Icons.error_outline,
@@ -938,7 +945,7 @@ class _MaterialReceiptDetailScreenState
                       ),
                       child: TextField(
                         controller: _qtyController,
-                        keyboardType: TextInputType.number,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontSize: 17,
@@ -985,6 +992,40 @@ class _MaterialReceiptDetailScreenState
                               _drainScanQueue();
                             }
                           },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Búsqueda escrita de productos
+                    GestureDetector(
+                      onTap: () async {
+                        final row = await showItemSearchDialog(
+                          context,
+                          provider.erpNextService,
+                          title: 'Buscar producto',
+                        );
+                        if (row == null || !mounted) return;
+                        final qty = double.tryParse(
+                              _qtyController.text.trim().replaceAll(',', '.'),
+                            ) ??
+                            1.0;
+                        await provider.addItemToReceiptByCode(
+                          (row['name'] ?? '').toString(),
+                          quantity: qty,
+                        );
+                        _qtyController.text = '1';
+                      },
+                      child: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: AppDesign.tealIcon,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.manage_search,
+                          color: Colors.white,
+                          size: 22,
                         ),
                       ),
                     ),
@@ -1258,6 +1299,15 @@ class _MaterialReceiptDetailScreenState
                       return _buildItemCard(receipt.items[index], index);
                     },
                   ),
+
+                // ─── RESUMEN: SUBTOTAL / IMPUESTO / TOTAL ───
+                if (receipt.items.isNotEmpty)
+                  buildTotalsSummary(
+                    subtotal: receipt.subtotal,
+                    tax: _effectiveTax(receipt),
+                    total: _effectiveTotal(receipt),
+                    currency: currency,
+                  ),
               ],
             ),
           ),
@@ -1332,6 +1382,44 @@ class _MaterialReceiptDetailScreenState
           ),
       ],
     );
+  }
+
+  /// UOM del item (del item mismo o resuelta desde el catálogo).
+  String _mrUom(MaterialReceiptProvider provider, MaterialReceiptItem item) {
+    if (item.uom.isNotEmpty) return item.uom;
+    final cached = provider.itemsByCode[item.itemCode.toUpperCase()];
+    return cached?.stockUom ?? '';
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // TOTALES (Subtotal / Impuesto / Total)
+  // ══════════════════════════════════════════════════════════
+
+  /// Impuesto efectivo a mostrar. Si el doc ya pasó por el ERP, extrapola la
+  /// tasa real (impuesto / neto) al subtotal actual para que el total siga
+  /// cuadrando aunque el usuario edite cantidades o precios. Si aún no se
+  /// guardó, devuelve null (el ERP calcula los impuestos al guardar).
+  double? _effectiveTax(MaterialReceipt receipt) {
+    if (receipt.netTotal > 0 && receipt.taxesTotal > 0) {
+      return receipt.subtotal * (receipt.taxesTotal / receipt.netTotal);
+    }
+    if (receipt.id != null && receipt.netTotal > 0) return 0;
+    return null;
+  }
+
+  /// Total efectivo: subtotal en vivo + impuesto efectivo (o null si aún
+  /// no hay datos del ERP).
+  double? _effectiveTotal(MaterialReceipt receipt) {
+    final tax = _effectiveTax(receipt);
+    if (tax == null) return null;
+    return receipt.subtotal + tax;
+  }
+
+  /// Paso de los botones +/-: 0.5 si la UOM admite decimales, 1 si no.
+  double _mrStep(MaterialReceiptProvider provider, MaterialReceiptItem item) {
+    return provider.erpNextService.uomAllowsDecimals(_mrUom(provider, item))
+        ? 0.5
+        : 1.0;
   }
 
   Widget _buildItemCard(MaterialReceiptItem item, int index) {
@@ -1409,7 +1497,7 @@ class _MaterialReceiptDetailScreenState
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      '${item.qty}',
+                      fmtQty(item.qty),
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
@@ -1422,7 +1510,8 @@ class _MaterialReceiptDetailScreenState
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       GestureDetector(
-                        onTap: () => provider.updateItemQty(index, item.qty - 1),
+                        onTap: () => provider.updateItemQty(
+                            index, item.qty - _mrStep(provider, item)),
                         child: Container(
                           width: 30,
                           height: 30,
@@ -1433,20 +1522,38 @@ class _MaterialReceiptDetailScreenState
                           child: const Icon(Icons.remove, size: 16, color: Colors.red),
                         ),
                       ),
-                      Container(
-                        width: 40,
-                        alignment: Alignment.center,
-                        child: Text(
-                          '${item.qty}',
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: AppDesign.navy,
+                      GestureDetector(
+                        // Tap en la cantidad: edición exacta (decimales si la UOM lo permite)
+                        onTap: () async {
+                          final uom = _mrUom(provider, item);
+                          final allows =
+                              provider.erpNextService.uomAllowsDecimals(uom);
+                          final newQty = await showQtyInputDialog(
+                            context,
+                            current: item.qty,
+                            allowsDecimals: allows,
+                            uom: uom,
+                          );
+                          if (newQty != null) {
+                            provider.updateItemQty(index, newQty);
+                          }
+                        },
+                        child: Container(
+                          width: 40,
+                          alignment: Alignment.center,
+                          child: Text(
+                            fmtQty(item.qty),
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: AppDesign.navy,
+                            ),
                           ),
                         ),
                       ),
                       GestureDetector(
-                        onTap: () => provider.updateItemQty(index, item.qty + 1),
+                        onTap: () => provider.updateItemQty(
+                            index, item.qty + _mrStep(provider, item)),
                         child: Container(
                           width: 30,
                           height: 30,
