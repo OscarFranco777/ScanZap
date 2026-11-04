@@ -19,6 +19,11 @@ class InventoryProvider with ChangeNotifier {
   bool isLoadingItems = false;
   String connectionError = '';
 
+  // Resultado de la validación de permisos corrida con el último login.
+  // Cada entrada: {label, doctype, read, select, ok}.
+  List<Map<String, dynamic>> permissionResults = [];
+  bool missingPermissions = false;
+
   // ─── Datos base ───
   List<ItemModel> allItems = [];
   Map<String, ItemModel> itemsByCode = {};
@@ -109,6 +114,17 @@ class InventoryProvider with ChangeNotifier {
         notifyListeners();
         return false;
       }
+
+      // Validar permisos mínimos (leer + elegir) de los doctypes clave.
+      // Nunca bloquea el login: si falla la consulta, se asume sin faltantes.
+      try {
+        permissionResults = await erpNextService.checkUserPermissions();
+        missingPermissions = permissionResults.any((r) => r['ok'] != true);
+      } catch (_) {
+        permissionResults = [];
+        missingPermissions = false;
+      }
+      notifyListeners();
 
       if (deferItems) {
         // Login rápido: conectar y entrar al panel. Los items llegan después

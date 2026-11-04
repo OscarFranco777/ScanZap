@@ -54,6 +54,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
   List<Map<String, dynamic>> _prItems = [];
   String _prWarehouse = '';
   String _prNamingSeries = '';
+  String _prTaxesAndCharges = '';
   String _prCostCenter = '';
   String _prSupplier = '';
   DateTime _prDate = DateTime.now();
@@ -415,6 +416,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
       _prSupplier = order.supplier;
       _prDate = order.scheduleDate;
       _prNamingSeries = '';
+      _prTaxesAndCharges = '';
       _prSaved = false;
       _prSavedName = '';
     });
@@ -450,6 +452,9 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
 
       final poDetail = await service.getPurchaseOrderDetail(order!.id!);
       if (poDetail != null && poDetail['items'] != null) {
+        // Heredar la plantilla de impuestos de la PO para que el PR la
+        // copie (equivalente al mapper del UI del ERP).
+        _prTaxesAndCharges = (poDetail['taxes_and_charges'] ?? '') as String;
         final items = List<Map<String, dynamic>>.from(poDetail['items']);
         _prItems = items
             .map(
@@ -585,6 +590,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
         result = await service.updatePurchaseReceipt(
           name: _prSavedName,
           items: _prItems,
+          purchaseOrder: order!.id!,
         );
       } else {
         result = await service.createPurchaseReceipt(
@@ -598,6 +604,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
           items: _prItems,
           namingSeries: _prNamingSeries,
           costCenter: order.costCenter,
+          taxesAndCharges: _prTaxesAndCharges,
         );
       }
 
@@ -618,6 +625,7 @@ class _PurchaseOrderDetailScreenState extends State<PurchaseOrderDetailScreen> {
                     'received_qty': it['received_qty'] ?? 0,
                     'uom': it['uom'] ?? '',
                     'rate': it['rate'] ?? 0,
+                    'purchase_order': it['purchase_order'] ?? '',
                     'purchase_order_item': it['purchase_order_item'] ?? '',
                     'warehouse': it['warehouse'] ?? '',
                   })

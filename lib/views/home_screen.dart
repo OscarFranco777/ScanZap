@@ -40,6 +40,11 @@ class _HomeScreenState extends State<HomeScreen> {
         password: pass,
         rememberMe: true,
       );
+      // Si el login automático detectó permisos faltantes, mandar directo
+      // a Configuración donde se muestra el detalle.
+      if (provider.missingPermissions && mounted) {
+        Navigator.of(context).pushNamed('/config');
+      }
     } catch (_) {
       // Sin conexión guardada o fallo de red: el usuario conecta manual desde Config.
     }

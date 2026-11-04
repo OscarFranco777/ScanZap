@@ -17,7 +17,8 @@ class ErpNextService {
   String _password = '';
   String currency = 'HNL'; // Moneda de la company (se actualiza al conectar)
   String? _company; // Nombre de la company (cacheado al conectar)
-  String? _defaultPurchaseTaxTemplate; // Plantilla de impuestos de compra default (cacheada)
+  String?
+  _defaultPurchaseTaxTemplate; // Plantilla de impuestos de compra default (cacheada)
 
   late final Dio _dio;
   late final CookieJar _cookieJar;
@@ -127,6 +128,85 @@ class ErpNextService {
       throw Exception('No hay sesión activa');
     } catch (e) {
       throw Exception('Error de conexión: $e');
+    }
+  }
+
+  /// Valida que el usuario tenga los permisos MÍNIMOS (leer + elegir/select)
+  /// sobre los doctypes clave para operar: centro de costo, almacén y
+  /// plantillas de impuestos. Devuelve una lista con el resultado de cada chequeo.
+  Future<List<Map<String, dynamic>>> checkUserPermissions() async {
+    const checks = [
+      {'doctype': 'Cost Center', 'label': 'Centro de costo'},
+      {'doctype': 'Warehouse', 'label': 'Almacén'},
+      {
+        'doctype': 'Purchase Taxes and Charges Template',
+        'label': 'Plantilla de impuestos sobre compra',
+      },
+      {
+        'doctype': 'Item Tax Template',
+        'label': 'Impuesto del producto (Item Tax Template)',
+      },
+    ];
+    final results = <Map<String, dynamic>>[];
+    for (final c in checks) {
+      final read = await _canReadDoctype(c['doctype']!);
+      final select = await _canSelectDoctype(c['doctype']!);
+      results.add({
+        'label': c['label'],
+        'doctype': c['doctype'],
+        'read': read,
+        'select': select,
+        'ok': read && select,
+      });
+    }
+    return results;
+  }
+
+  /// Prueba si el usuario puede ELEGIR (select) un doctype: es el permiso
+  /// que usan los campos link y los buscadores del ERP.
+  Future<bool> _canSelectDoctype(String doctype) async {
+    try {
+      final response = await _dio.post(
+        '$baseUrl/api/method/frappe.desk.search.search_link',
+        data: {
+          'doctype': doctype,
+          'txt': '',
+        },
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Prueba si el usuario puede LEER un doctype. Ojo: get_list solo exige
+  /// permiso de elegir (con select puro devuelve 200 con solo el nombre),
+  /// así que primero saco un nombre con get_list y después pido el documento
+  /// completo con frappe.client.get, que sí exige read de verdad.
+  Future<bool> _canReadDoctype(String doctype) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': doctype,
+          'fields': '["name"]',
+          'limit_page_length': 1,
+        },
+      );
+      if (response.statusCode != 200) return false;
+      final rows = response.data?['message'];
+      if (rows is! List || rows.isEmpty) return false;
+      final name = rows.first['name']?.toString() ?? '';
+      if (name.isEmpty) return false;
+
+      // get del documento completo: 403 si no tiene read
+      final docResponse = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get',
+        queryParameters: {'doctype': doctype, 'name': name},
+      );
+      return docResponse.statusCode == 200;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -271,7 +351,7 @@ class ErpNextService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error creando item: ${response.data}');
+    throw _erpResponseError(response, 'Error creando item');
   }
 
   /// Obtiene el siguiente número de serie.
@@ -508,8 +588,10 @@ class ErpNextService {
 
   /// Busca items en ERPNext por código o nombre (búsqueda escrita manual).
   /// Devuelve filas con name, item_code, item_name y stock_uom.
-  Future<List<Map<String, dynamic>>> searchItems(String query,
-      {int limit = 20}) async {
+  Future<List<Map<String, dynamic>>> searchItems(
+    String query, {
+    int limit = 20,
+  }) async {
     final q = query.trim();
     if (q.isEmpty) return [];
     try {
@@ -656,7 +738,7 @@ class ErpNextService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error guardando borrador: ${response.data}');
+    throw _erpResponseError(response, 'Error guardando borrador');
   }
 
   /// Actualiza un borrador existente en ERPNext (agrega/modifica items).
@@ -690,7 +772,7 @@ class ErpNextService {
     if (response.statusCode == 200) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error actualizando borrador: ${response.data}');
+    throw _erpResponseError(response, 'Error actualizando borrador');
   }
 
   /// Hace submit de una Purchase Order borrador (docstatus 0 → 1).
@@ -714,7 +796,7 @@ class ErpNextService {
       if (response.statusCode == 200) {
         return response.data['data'] ?? {};
       }
-      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+      throw _erpResponseError(response, 'Error enviando orden');
     } on DioException catch (e) {
       throw _erpError(e, 'Error enviando orden');
     }
@@ -739,7 +821,7 @@ class ErpNextService {
       if (response.statusCode == 200) {
         return response.data['data'] ?? {};
       }
-      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+      throw _erpResponseError(response, 'Error cancelando orden');
     } on DioException catch (e) {
       throw _erpError(e, 'Error cancelando orden');
     }
@@ -770,6 +852,7 @@ class ErpNextService {
     required String purchaseOrder,
     required String supplier,
     required List<Map<String, dynamic>> items,
+    String? taxesAndCharges,
     String? costCenter,
     String? setWarehouse,
     String? billNo,
@@ -804,6 +887,10 @@ class ErpNextService {
           )
           .toList(),
     };
+    final taxes =
+        taxesAndCharges ??
+        await _resolvePurchaseInvoiceTaxes(purchaseOrder: purchaseOrder);
+    if (taxes != null && taxes.isNotEmpty) doc['taxes_and_charges'] = taxes;
 
     final response = await _dio.post(
       '$baseUrl/api/resource/Purchase%20Invoice',
@@ -813,7 +900,7 @@ class ErpNextService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error creando Purchase Invoice: ${response.data}');
+    throw _erpResponseError(response, 'Error creando factura');
   }
 
   /// Hace submit de un Purchase Invoice (borrador → enviado).
@@ -834,7 +921,7 @@ class ErpNextService {
       if (response.statusCode == 200) {
         return response.data['data'] ?? {};
       }
-      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+      throw _erpResponseError(response, 'Error enviando factura');
     } on DioException catch (e) {
       throw _erpError(e, 'Error enviando factura');
     }
@@ -870,19 +957,32 @@ class ErpNextService {
     }
   }
 
+  /// Extrae el detalle del cuerpo de error del ERP.
+  String _erpDetail(dynamic data) {
+    if (data == null) return '';
+    if (data is Map) {
+      return (data['exc'] ??
+              data['_server_messages'] ??
+              data['message'] ??
+              data.toString())
+          .toString();
+    }
+    return data.toString();
+  }
+
+  /// Sin permisos: 403 o el server menciona PermissionError / Not permitted.
+  bool _esErrorPermiso(int? statusCode, String detail) {
+    return statusCode == 403 ||
+        detail.contains('PermissionError') ||
+        detail.contains('Not permitted') ||
+        detail.contains('InsufficientPermission');
+  }
+
   /// Normaliza el error del ERP (DioException) a un mensaje legible.
   Exception _erpError(DioException e, String fallback) {
-    String detail = '';
-    if (e.response?.data != null) {
-      if (e.response!.data is Map) {
-        detail =
-            e.response!.data['exc'] ??
-            e.response!.data['_server_messages'] ??
-            e.response!.data['message'] ??
-            e.response!.data.toString();
-      } else {
-        detail = e.response!.data.toString();
-      }
+    final detail = _erpDetail(e.response?.data);
+    if (_esErrorPermiso(e.response?.statusCode, detail)) {
+      return Exception(_msgSinPermiso);
     }
     if (detail.isNotEmpty) {
       return Exception('Servidor: $detail');
@@ -891,6 +991,22 @@ class ErpNextService {
       '$fallback — HTTP ${e.response?.statusCode}: ${e.message}',
     );
   }
+
+  /// Normaliza una respuesta fallida (validateStatus deja pasar 4xx).
+  Exception _erpResponseError(Response response, String fallback) {
+    final detail = _erpDetail(response.data);
+    if (_esErrorPermiso(response.statusCode, detail)) {
+      return Exception(_msgSinPermiso);
+    }
+    if (detail.isNotEmpty) {
+      return Exception('Servidor: $detail');
+    }
+    return Exception('$fallback — HTTP ${response.statusCode}');
+  }
+
+  static const _msgSinPermiso =
+      'No tenés permisos para realizar esta operación en el ERP — '
+      'pedile al administrador que te asigne el rol necesario.';
 
   /// Obtiene una Purchase Order por nombre.
   Future<Map<String, dynamic>?> getPurchaseOrder(String name) async {
@@ -1017,6 +1133,36 @@ class ErpNextService {
     throw Exception('No se pudo leer el estado de la recepción $name');
   }
 
+  /// Resuelve la plantilla de impuestos para una Purchase Invoice heredando
+  /// del documento fuente (recepción u orden) — igual que hace el mapper del
+  /// ERP al facturar desde la UI. Fallback: plantilla default de la compañía.
+  Future<String?> _resolvePurchaseInvoiceTaxes({
+    String? purchaseReceipt,
+    String? purchaseOrder,
+  }) async {
+    try {
+      if (purchaseReceipt != null && purchaseReceipt.isNotEmpty) {
+        final r = await _dio.get(
+          '$baseUrl/api/resource/Purchase%20Receipt/${Uri.encodeComponent(purchaseReceipt)}',
+          queryParameters: {'fields': '["taxes_and_charges"]'},
+        );
+        final t = r.data?['data']?['taxes_and_charges']?.toString();
+        if (t != null && t.isNotEmpty) return t;
+      }
+      if (purchaseOrder != null && purchaseOrder.isNotEmpty) {
+        final r = await _dio.get(
+          '$baseUrl/api/resource/Purchase%20Order/${Uri.encodeComponent(purchaseOrder)}',
+          queryParameters: {'fields': '["taxes_and_charges"]'},
+        );
+        final t = r.data?['data']?['taxes_and_charges']?.toString();
+        if (t != null && t.isNotEmpty) return t;
+      }
+    } catch (e) {
+      print('[Service] _resolvePurchaseInvoiceTaxes error: $e');
+    }
+    return _getDefaultPurchaseTaxTemplate();
+  }
+
   /// Crea un Purchase Invoice como borrador desde un Purchase Receipt enviado.
   /// Los items deben traer item_code, qty, rate, name (pr_detail) y warehouse
   /// para que el ERP vincule la factura con la recepción.
@@ -1026,6 +1172,7 @@ class ErpNextService {
     required String purchaseReceipt,
     required String supplier,
     required List<Map<String, dynamic>> items,
+    String? taxesAndCharges,
     String? costCenter,
     String? setWarehouse,
     String? billNo,
@@ -1060,6 +1207,10 @@ class ErpNextService {
           )
           .toList(),
     };
+    final taxes =
+        taxesAndCharges ??
+        await _resolvePurchaseInvoiceTaxes(purchaseReceipt: purchaseReceipt);
+    if (taxes != null && taxes.isNotEmpty) doc['taxes_and_charges'] = taxes;
 
     final response = await _dio.post(
       '$baseUrl/api/resource/Purchase%20Invoice',
@@ -1069,7 +1220,7 @@ class ErpNextService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error creando Purchase Invoice: ${response.data}');
+    throw _erpResponseError(response, 'Error creando factura');
   }
 
   /// Crea un Purchase Invoice como borrador SIN orden ni recepción vinculada
@@ -1082,8 +1233,13 @@ class ErpNextService {
     String? setWarehouse,
     String? costCenter,
     bool updateStock = true,
+    String? taxesAndCharges,
   }) async {
+    // Sin documento fuente: hereda la default de la compañía (mismo
+    // comportamiento que el UI del ERP al crear una factura directa).
+    final taxes = taxesAndCharges ?? await _resolvePurchaseInvoiceTaxes();
     final doc = {
+      if (taxes != null && taxes.isNotEmpty) 'taxes_and_charges': taxes,
       'doctype': 'Purchase Invoice',
       'supplier': supplier,
       'posting_date': DateTime.now().toIso8601String().substring(0, 10),
@@ -1118,7 +1274,7 @@ class ErpNextService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error creando Purchase Invoice: ${response.data}');
+    throw _erpResponseError(response, 'Error creando factura');
   }
 
   /// Actualiza un Purchase Invoice borrador existente (items + bill_no).
@@ -1129,7 +1285,7 @@ class ErpNextService {
     bool? updateStock,
   }) async {
     final doc = {
-      if (billNo != null) 'bill_no': billNo,
+      'bill_no': ?billNo,
       if (updateStock != null) 'update_stock': updateStock,
       'items': items
           .map(
@@ -1159,7 +1315,7 @@ class ErpNextService {
     if (response.statusCode == 200) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error actualizando Purchase Invoice: ${response.data}');
+    throw _erpResponseError(response, 'Error actualizando factura');
   }
 
   /// Obtiene un Purchase Invoice por nombre.
@@ -1365,7 +1521,7 @@ class ErpNextService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error creando Purchase Receipt: ${response.data}');
+    throw _erpResponseError(response, 'Error creando recepción');
   }
 
   /// Crea un Purchase Receipt como borrador desde una PO.
@@ -1376,6 +1532,7 @@ class ErpNextService {
     required List<Map<String, dynamic>> items,
     String? namingSeries,
     String? costCenter,
+    String? taxesAndCharges,
   }) async {
     final doc = {
       'doctype': 'Purchase Receipt',
@@ -1386,6 +1543,11 @@ class ErpNextService {
         'naming_series': namingSeries,
       if (costCenter != null && costCenter.isNotEmpty)
         'cost_center': costCenter,
+      // Heredar la plantilla de impuestos de la PO (el mapper del UI del ERP
+      // la copia al crear PR desde PO; vía API hay que mandarla explícita
+      // para que el servidor expanda la tabla taxes).
+      if (taxesAndCharges != null && taxesAndCharges.isNotEmpty)
+        'taxes_and_charges': taxesAndCharges,
       'items': items
           .map(
             (item) => {
@@ -1415,13 +1577,16 @@ class ErpNextService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error creando Purchase Receipt: ${response.data}');
+    throw _erpResponseError(response, 'Error creando recepción');
   }
 
   /// Actualiza un Purchase Receipt borrador existente.
+  /// [purchaseOrder] se reenvía en cada ítem porque el PUT reemplaza la tabla:
+  /// si los items locales no traen la key, el link con la PO se pierde.
   Future<Map<String, dynamic>> updatePurchaseReceipt({
     required String name,
     required List<Map<String, dynamic>> items,
+    String? purchaseOrder,
   }) async {
     final doc = {
       'items': items
@@ -1431,8 +1596,10 @@ class ErpNextService {
               'item_code': item['item_code'],
               'qty': item['qty'],
               'warehouse': item['warehouse'],
-              if (item['purchase_order'] != null)
-                'purchase_order': item['purchase_order'],
+              if ((item['purchase_order'] as String? ?? '').isNotEmpty)
+                'purchase_order': item['purchase_order']
+              else if (purchaseOrder != null && purchaseOrder.isNotEmpty)
+                'purchase_order': purchaseOrder,
               if (item['purchase_order_item'] != null)
                 'purchase_order_item': item['purchase_order_item'],
               if (_validUom(item['uom'])) 'uom': item['uom'],
@@ -1455,7 +1622,7 @@ class ErpNextService {
     if (response.statusCode == 200) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error actualizando Purchase Receipt: ${response.data}');
+    throw _erpResponseError(response, 'Error actualizando recepción');
   }
 
   /// Hace submit de un Purchase Receipt.
@@ -1476,24 +1643,9 @@ class ErpNextService {
       if (response.statusCode == 200) {
         return response.data['data'] ?? {};
       }
-      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+      throw _erpResponseError(response, 'Error enviando recepción');
     } on DioException catch (e) {
-      String detail = '';
-      if (e.response?.data != null) {
-        if (e.response!.data is Map) {
-          detail =
-              e.response!.data['exc'] ??
-              e.response!.data['_server_messages'] ??
-              e.response!.data['message'] ??
-              e.response!.data.toString();
-        } else {
-          detail = e.response!.data.toString();
-        }
-      }
-      if (detail.isNotEmpty) {
-        throw Exception('Servidor: $detail');
-      }
-      throw Exception('Error HTTP ${e.response?.statusCode}: ${e.message}');
+      throw _erpError(e, 'Error enviando registro');
     }
   }
 
@@ -1599,16 +1751,20 @@ class ErpNextService {
         } catch (_) {}
       }
       if (companyName == null || companyName.isEmpty) {
+        // System Settings requiere rol System Manager (los usuarios comunes
+        // reciben {} silencioso en get_value); la lista de Company sí es
+        // legible para usuarios normales. Con una sola company (SuperZito)
+        // es la resolución correcta.
         try {
-          final sysRes = await _dio.get(
-            '$baseUrl/api/method/frappe.client.get_value',
-            queryParameters: {
-              'doctype': 'System Settings',
-              'fieldname': 'default_company',
-            },
+          final compRes = await _dio.get(
+            '$baseUrl/api/resource/Company',
+            queryParameters: {'fields': '["name"]', 'limit_page_length': '0'},
           );
-          final c = sysRes.data?['message']?.toString();
-          if (c != null && c.isNotEmpty) companyName = c;
+          final List list = compRes.data?['data'] ?? const [];
+          if (list.length == 1) {
+            final c = list.first['name']?.toString();
+            if (c != null && c.isNotEmpty) companyName = c;
+          }
         } catch (_) {}
       }
       if (companyName == null || companyName.isEmpty) return null;
@@ -1617,8 +1773,7 @@ class ErpNextService {
       final res = await _dio.get(
         '$baseUrl/api/resource/Purchase%20Taxes%20and%20Charges%20Template',
         queryParameters: {
-          'filters':
-              '[["company","=","$companyName"],["is_default","=",1]]',
+          'filters': '[["company","=","$companyName"],["is_default","=",1]]',
           'fields': '["name"]',
           'limit_page_length': '1',
         },
@@ -1757,9 +1912,7 @@ class ErpNextService {
   }
 
   /// Lista Stock Entries existentes.
-  Future<List<Map<String, dynamic>>> listStockEntries({
-    int limit = 50,
-  }) async {
+  Future<List<Map<String, dynamic>>> listStockEntries({int limit = 50}) async {
     try {
       final response = await _dio.get(
         '$baseUrl/api/method/frappe.client.get_list',
@@ -1850,7 +2003,7 @@ class ErpNextService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error creando Stock Entry: ${response.data}');
+    throw _erpResponseError(response, 'Error creando entrada de inventario');
   }
 
   /// Actualiza un Stock Entry borrador existente (items + cabecera).
@@ -1867,9 +2020,9 @@ class ErpNextService {
       'stock_entry_type': stockEntryType,
       if (sourceWarehouse != null) 'from_warehouse': sourceWarehouse,
       // Header del Stock Entry usa 'to_warehouse', no 't_warehouse'.
-      if (targetWarehouse != null) 'to_warehouse': targetWarehouse,
-      if (remarks != null) 'remarks': remarks,
-      if (costCenter != null) 'cost_center': costCenter,
+      'to_warehouse': ?targetWarehouse,
+      'remarks': ?remarks,
+      'cost_center': ?costCenter,
       'items': items
           .map(
             (item) => {
@@ -1894,7 +2047,7 @@ class ErpNextService {
     if (response.statusCode == 200) {
       return response.data['data'] ?? {};
     }
-    throw Exception('Error actualizando Stock Entry: ${response.data}');
+    throw _erpResponseError(response, 'Error actualizando entrada de inventario');
   }
 
   /// Hace submit de un Stock Entry (docstatus 0 → 1).
@@ -1903,8 +2056,7 @@ class ErpNextService {
       final docResponse = await _dio.get(
         '$baseUrl/api/resource/Stock%20Entry/${Uri.encodeComponent(name)}',
       );
-      if (docResponse.statusCode != 200 ||
-          docResponse.data?['data'] == null) {
+      if (docResponse.statusCode != 200 || docResponse.data?['data'] == null) {
         throw Exception('No se pudo obtener el Stock Entry $name para enviar');
       }
       final Map<String, dynamic> doc = docResponse.data['data'];
@@ -1916,23 +2068,9 @@ class ErpNextService {
       if (response.statusCode == 200) {
         return response.data['data'] ?? {};
       }
-      throw Exception('Error HTTP ${response.statusCode}: ${response.data}');
+      throw _erpResponseError(response, 'Error enviando entrada de inventario');
     } on DioException catch (e) {
-      String detail = '';
-      if (e.response?.data != null) {
-        if (e.response!.data is Map) {
-          detail = e.response!.data['exc'] ??
-              e.response!.data['_server_messages'] ??
-              e.response!.data['message'] ??
-              e.response!.data.toString();
-        } else {
-          detail = e.response!.data.toString();
-        }
-      }
-      if (detail.isNotEmpty) {
-        throw Exception('Servidor: $detail');
-      }
-      throw Exception('Error HTTP ${e.response?.statusCode}: ${e.message}');
+      throw _erpError(e, 'Error enviando registro');
     }
   }
 

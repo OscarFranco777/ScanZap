@@ -21,11 +21,23 @@ class _ConfigScreenState extends State<ConfigScreen> {
   bool _isConnected = false;
   String? _error;
   String _progressText = '';
+  bool _checkingPerms = false;
+  List<Map<String, dynamic>> _permResults = [];
+  String? _permError;
 
   @override
   void initState() {
     super.initState();
     _loadSaved();
+    // Si el login ya corrió la validación de permisos (auto-login con
+    // Recordarme, o login manual previo), mostrar el resultado de una.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final provider = context.read<InventoryProvider>();
+      if (provider.permissionResults.isNotEmpty) {
+        setState(() => _permResults = provider.permissionResults);
+      }
+    });
   }
 
   Future<void> _loadSaved() async {
@@ -68,6 +80,24 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
     if (ok) {
       setState(() => _isConnected = true);
+
+      // Si al login le faltaron permisos mínimos, quedarse en esta pantalla
+      // mostrando el detalle en vez de entrar al panel.
+      if (provider.missingPermissions) {
+        setState(() {
+          _permResults = provider.permissionResults;
+          _permError =
+              '⚠️ Iniciaste sesión, pero tu usuario no tiene los permisos mínimos (leer y elegir) para algunos registros. Detalle abajo.';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Faltan permisos — revisá el detalle abajo'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('✅ Conectado — cargando productos en segundo plano...'),
@@ -80,6 +110,41 @@ class _ConfigScreenState extends State<ConfigScreen> {
     } else {
       setState(() => _error = provider.connectionError);
     }
+  }
+
+  /// Valida que el usuario tenga acceso de lectura a los registros clave
+  /// (centro de costo, almacén, plantillas de impuestos).
+  Future<void> _validatePermissions() async {
+    setState(() {
+      _checkingPerms = true;
+      _permResults = [];
+      _permError = null;
+    });
+
+    final provider = context.read<InventoryProvider>();
+
+    // Si no hay sesión activa, avisar en vez de marcar todo en rojo.
+    try {
+      await provider.erpNextService.testConnection();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _checkingPerms = false;
+        _permError = 'Iniciá sesión primero para validar los permisos.';
+      });
+      return;
+    }
+
+    try {
+      final results = await provider.erpNextService.checkUserPermissions();
+      if (!mounted) return;
+      setState(() => _permResults = results);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _permError = e.toString().replaceFirst('Exception: ', ''));
+    }
+
+    if (mounted) setState(() => _checkingPerms = false);
   }
 
   @override
@@ -232,6 +297,142 @@ class _ConfigScreenState extends State<ConfigScreen> {
                       ),
                     ),
                   ),
+
+                  const SizedBox(height: 32),
+                  const Divider(),
+                  const SizedBox(height: 8),
+
+                  // ══════════════════════════════════════════════
+                  // Validación de permisos del usuario
+                  // ══════════════════════════════════════════════
+                  Row(
+                    children: [
+                      Icon(Icons.verified_user_outlined,
+                          size: 20, color: Colors.grey[700]),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Permisos del usuario',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Verifica que tu usuario tenga acceso a los registros que el app necesita: centro de costo, almacén y plantillas de impuestos.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: OutlinedButton.icon(
+                      onPressed: _checkingPerms ? null : _validatePermissions,
+                      icon: _checkingPerms
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.fact_check_outlined),
+                      label: Text(_checkingPerms ? 'Validando...' : 'Validar permisos'),
+                    ),
+                  ),
+
+                  // Resultado de la validación
+                  if (_permError != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange[300]!),
+                      ),
+                      child: Text(
+                        _permError!,
+                        style: TextStyle(color: Colors.orange[900]),
+                      ),
+                    ),
+                  ],
+                  if (_permResults.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey[300]!),
+                      ),
+                      child: Column(
+                        children: [
+                          for (final r in _permResults)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    r['ok'] == true
+                                        ? Icons.check_circle
+                                        : Icons.cancel,
+                                    color: r['ok'] == true
+                                        ? Colors.green
+                                        : Colors.red,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          r['label'] as String,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        Text(
+                                          r['ok'] == true
+                                              ? 'Con acceso (leer y elegir)'
+                                              : r['read'] == true
+                                                  ? 'Puede leer pero NO elegir (select) — pedile al administrador el rol necesario'
+                                                  : 'Sin acceso — pedile al administrador el rol necesario',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: r['ok'] == true
+                                                ? Colors.green[700]
+                                                : Colors.red[700],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (_permResults.any((r) => r['ok'] != true))
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                '⚠️ Tu usuario no tiene acceso a algunos registros. Pedile al administrador que te asigne los permisos necesarios.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.red[800],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
