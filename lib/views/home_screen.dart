@@ -254,7 +254,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // Nombre
           const Expanded(
             child: Text(
-              'SCAN-ZAP',
+              'ScanZapp',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w800,

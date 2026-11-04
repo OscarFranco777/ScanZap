@@ -17,6 +17,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
   final _userController = TextEditingController();
   final _passController = TextEditingController();
   bool _rememberMe = false;
+  bool _obscurePassword = true;
   bool _isLoading = false;
   bool _isConnected = false;
   String? _error;
@@ -67,7 +68,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
     // Login rápido: solo autentica y configura la sesión. El catálogo de
     // productos se carga en segundo plano DESPUÉS de entrar al panel principal.
     final ok = await provider.connectToErpNext(
-      url: _urlController.text,
+      url: _normalizeUrl(_urlController.text),
       username: _userController.text,
       password: _passController.text,
       rememberMe: _rememberMe,
@@ -189,16 +190,15 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     controller: _urlController,
                     decoration: const InputDecoration(
                       labelText: 'URL de ERPNext',
-                      hintText: 'https://mi-instancia.erp.nextoncloud.net',
+                      hintText: 'mi-instancia.erp.nextoncloud.net',
                       prefixIcon: Icon(Icons.language),
                       border: OutlineInputBorder(),
                     ),
                     keyboardType: TextInputType.url,
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Ingresá la URL';
-                      if (!v.startsWith('http')) return 'Debe empezar con http:// o https://';
-                      return null;
-                    },
+                    // El https:// se agrega solo en _normalizeUrl; acá no se
+                    // exige para no obligar a escribirlo a mano.
+                    validator: (v) =>
+                        v == null || v.trim().isEmpty ? 'Ingresá la URL' : null,
                   ),
                   const SizedBox(height: 16),
 
@@ -207,7 +207,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     controller: _userController,
                     decoration: const InputDecoration(
                       labelText: 'Usuario',
-                      hintText: 'ej: oscar@superzito.com',
+                      hintText: 'ej: usuario@empresa.com',
                       prefixIcon: Icon(Icons.person),
                       border: OutlineInputBorder(),
                     ),
@@ -219,12 +219,21 @@ class _ConfigScreenState extends State<ConfigScreen> {
                   // Campo Contraseña
                   TextFormField(
                     controller: _passController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Contraseña',
-                      prefixIcon: Icon(Icons.lock),
-                      border: OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.lock),
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscurePassword = !_obscurePassword),
+                      ),
                     ),
-                    obscureText: true,
+                    obscureText: _obscurePassword,
                     validator: (v) => v == null || v.trim().isEmpty ? 'Ingresá la contraseña' : null,
                   ),
                   const SizedBox(height: 12),
@@ -448,5 +457,16 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _userController.dispose();
     _passController.dispose();
     super.dispose();
+  }
+
+  /// Normaliza la URL: agrega https:// si el usuario no lo escribió y
+  /// quita barras finales para evitar '//api' en los endpoints.
+  String _normalizeUrl(String raw) {
+    var v = raw.trim();
+    if (v.isEmpty) return v;
+    if (!v.startsWith('http://') && !v.startsWith('https://')) {
+      v = 'https://$v';
+    }
+    return v.replaceAll(RegExp(r'/+$'), '');
   }
 }
