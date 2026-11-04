@@ -16,6 +16,8 @@ class ErpNextService {
   String _username = '';
   String _password = '';
   String currency = 'HNL'; // Moneda de la company (se actualiza al conectar)
+  String? _company; // Nombre de la company (cacheado al conectar)
+  String? _defaultPurchaseTaxTemplate; // Plantilla de impuestos de compra default (cacheada)
 
   late final Dio _dio;
   late final CookieJar _cookieJar;
@@ -617,7 +619,12 @@ class ErpNextService {
     String costCenter = '',
     String setWarehouse = '',
     String namingSeries = '',
+    String? taxesAndCharges,
   }) async {
+    // Resolvemos la plantilla de impuestos de compra default si no vino una.
+    // Sin ella el ERP no expande la tabla taxes vía API (en el UI lo hace el
+    // trigger del browser, por API no corre) y la orden queda sin impuestos.
+    final taxes = taxesAndCharges ?? await _getDefaultPurchaseTaxTemplate();
     final doc = {
       'doctype': 'Purchase Order',
       'supplier': supplier,
@@ -627,6 +634,7 @@ class ErpNextService {
       if (namingSeries.isNotEmpty) 'naming_series': namingSeries,
       if (costCenter.isNotEmpty) 'cost_center': costCenter,
       if (setWarehouse.isNotEmpty) 'set_warehouse': setWarehouse,
+      if (taxes != null && taxes.isNotEmpty) 'taxes_and_charges': taxes,
       'items': items
           .map(
             (item) => {
@@ -655,8 +663,13 @@ class ErpNextService {
   Future<Map<String, dynamic>> updatePurchaseOrder({
     required String name,
     required List<Map<String, dynamic>> items,
+    String? taxesAndCharges,
   }) async {
+    // Reenviamos la plantilla default (si la orden vieja quedó sin impuestos,
+    // el servidor la expande al validar; si ya tiene la misma, no toca nada).
+    final taxes = taxesAndCharges ?? await _getDefaultPurchaseTaxTemplate();
     final doc = {
+      if (taxes != null && taxes.isNotEmpty) 'taxes_and_charges': taxes,
       'items': items
           .map(
             (item) => {
@@ -1557,6 +1570,76 @@ class ErpNextService {
   }
 
   // ══════════════════════════════════════════════════════════════
+  // PLANTILLA DE IMPUESTOS DE COMPRA
+  // ══════════════════════════════════════════════════════════════
+
+  /// Devuelve la plantilla de impuestos de compra default de la company
+  /// (Purchase Taxes and Charges Template con is_default=1), cacheada.
+  /// Es la misma que el UI del ERP aplica al crear la orden; por API hay que
+  /// mandarla explícitamente en `taxes_and_charges` para que el servidor
+  /// expanda la tabla `taxes` y resuelva el item_tax_template de cada ítem
+  /// (ej. ítems con 18%INCL toman su plantilla del master del ítem).
+  Future<String?> _getDefaultPurchaseTaxTemplate() async {
+    if (_defaultPurchaseTaxTemplate != null &&
+        _defaultPurchaseTaxTemplate!.isNotEmpty) {
+      return _defaultPurchaseTaxTemplate;
+    }
+    try {
+      // Resolver la company si todavía no se cacheó (mismo fallback que
+      // fetchCompanyCurrency: User del usuario → System Settings).
+      String? companyName = _company;
+      if (companyName == null || companyName.isEmpty) {
+        try {
+          final userResponse = await _dio.get(
+            '$baseUrl/api/resource/User/${Uri.encodeComponent(_loggedUser)}',
+            queryParameters: {'fields': '["company"]'},
+          );
+          final c = userResponse.data?['data']?['company'];
+          if (c != null && c.toString().isNotEmpty) companyName = c.toString();
+        } catch (_) {}
+      }
+      if (companyName == null || companyName.isEmpty) {
+        try {
+          final sysRes = await _dio.get(
+            '$baseUrl/api/method/frappe.client.get_value',
+            queryParameters: {
+              'doctype': 'System Settings',
+              'fieldname': 'default_company',
+            },
+          );
+          final c = sysRes.data?['message']?.toString();
+          if (c != null && c.isNotEmpty) companyName = c;
+        } catch (_) {}
+      }
+      if (companyName == null || companyName.isEmpty) return null;
+      _company = companyName;
+
+      final res = await _dio.get(
+        '$baseUrl/api/resource/Purchase%20Taxes%20and%20Charges%20Template',
+        queryParameters: {
+          'filters':
+              '[["company","=","$companyName"],["is_default","=",1]]',
+          'fields': '["name"]',
+          'limit_page_length': '1',
+        },
+      );
+      final list = res.data?['data'];
+      if (list is List && list.isNotEmpty) {
+        final name = list.first['name']?.toString();
+        if (name != null && name.isNotEmpty) {
+          _defaultPurchaseTaxTemplate = name;
+          print('[Service] Plantilla de impuestos de compra default: $name');
+        }
+      } else {
+        print('[Service] Sin plantilla de impuestos default para $companyName');
+      }
+    } catch (e) {
+      print('[Service] Error buscando plantilla de impuestos default: $e');
+    }
+    return _defaultPurchaseTaxTemplate;
+  }
+
+  // ══════════════════════════════════════════════════════════════
   // COMPANY / CURRENCY
   // ══════════════════════════════════════════════════════════════
 
@@ -1571,6 +1654,7 @@ class ErpNextService {
       );
       final companyName = userResponse.data?['data']?['company'];
       if (companyName != null && companyName.toString().isNotEmpty) {
+        _company ??= companyName.toString();
         final companyResponse = await _dio.get(
           '$baseUrl/api/resource/Company/${Uri.encodeComponent(companyName)}',
           queryParameters: {'fields': '["default_currency"]'},
@@ -1597,6 +1681,7 @@ class ErpNextService {
       );
       final companyName = sysRes.data?['message']?.toString();
       if (companyName != null && companyName.isNotEmpty) {
+        _company ??= companyName;
         final companyResponse = await _dio.get(
           '$baseUrl/api/resource/Company/${Uri.encodeComponent(companyName)}',
           queryParameters: {'fields': '["default_currency"]'},
