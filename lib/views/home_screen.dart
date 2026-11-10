@@ -64,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ─── Header ───
-              _buildHeader(provider, isSmall),
+              _buildHeader(context, provider, isSmall),
 
               // ─── Stats Card ───
               _buildStatsCard(provider, isSmall),
@@ -171,6 +171,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     const SizedBox(height: 14),
 
+                    // Row 3: Etiquetas de Precio (ancho completo)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _ModuleCard(
+                            title: 'Etiquetas de\nPrecio',
+                            icon: Icons.price_check,
+                            bgColor: const Color(0xFFFFF9E6),
+                            iconBgColor: const Color(0xFFFFF0B3),
+                            iconColor: const Color(0xFFF9A825),
+                            onTap: () => Navigator.pushNamed(context, '/labels'),
+                          ),
+                        ),
+                      ],
+                    ),
+
                     // Row 2: Reportes + Gestión de Inventario
                     Row(
                       children: [
@@ -204,7 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 24),
 
               // ─── Config bar ───
-              _buildConfigBar(context, isSmall),
+              _buildConfigBar(context, isSmall, provider),
 
               const SizedBox(height: 12),
 
@@ -223,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // HEADER
   // ══════════════════════════════════════════════════════════════
 
-  Widget _buildHeader(InventoryProvider provider, bool isSmall) {
+  Widget _buildHeader(BuildContext context, InventoryProvider provider, bool isSmall) {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(isSmall ? 20 : 32, 16, isSmall ? 20 : 32, 16),
@@ -295,6 +311,26 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
+          // ⚙️ Configuración — solo visible con sesión iniciada
+          if (provider.isConnected) ...[
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: () => Navigator.pushNamed(context, '/config'),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.settings_outlined,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -382,46 +418,48 @@ class _HomeScreenState extends State<HomeScreen> {
   // CONFIG BAR
   // ══════════════════════════════════════════════════════════════
 
-  Widget _buildConfigBar(BuildContext context, bool isSmall) {
+  Widget _buildConfigBar(BuildContext context, bool isSmall, InventoryProvider provider) {
+    // Barra SIEMPRE de Iniciar sesión → /login (el ⚙️ de Configuración
+    // vive en el header, separado, y solo aparece con sesión activa)
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: isSmall ? 20 : 32),
       child: GestureDetector(
-        onTap: () => Navigator.pushNamed(context, '/config'),
+        onTap: () => Navigator.pushNamed(context, '/login'),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           decoration: BoxDecoration(
-            color: const Color(0xFFE8EDF3),
+            color: const Color(0xFFE3F0E3),
             borderRadius: BorderRadius.circular(16),
           ),
           child: Row(
             children: [
-              Icon(Icons.settings_outlined, size: 20, color: Colors.grey[600]),
+              const Icon(
+                Icons.login,
+                size: 20,
+                color: Color(0xFF2E7D32),
+              ),
               const SizedBox(width: 10),
-              Text(
-                'Configuración',
+              const Text(
+                'Iniciar sesión',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: Colors.grey[700],
+                  color: Color(0xFF2E7D32),
                 ),
               ),
               const Spacer(),
-              Text(
-                'Perfil de Usuario',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[500],
-                ),
-              ),
-              const SizedBox(width: 8),
               Container(
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: _navy.withValues(alpha: 0.1),
+                  color: const Color(0xFF2E7D32).withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.person_outline, size: 18, color: Colors.grey[600]),
+                child: const Icon(
+                  Icons.arrow_forward_ios,
+                  size: 18,
+                  color: Color(0xFF2E7D32),
+                ),
               ),
             ],
           ),

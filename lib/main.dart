@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/inventory_provider.dart';
+import 'providers/label_provider.dart';
 import 'providers/purchase_order_provider.dart';
 import 'providers/material_receipt_provider.dart';
 import 'providers/purchase_invoice_provider.dart';
@@ -8,6 +9,9 @@ import 'providers/stock_entry_provider.dart';
 import 'services/erpnext_service.dart';
 import 'views/config_screen.dart';
 import 'views/excel_upload_screen.dart';
+import 'views/label_designer_screen.dart';
+import 'views/label_screen.dart';
+import 'views/login_screen.dart';
 import 'views/scanner_screen.dart';
 import 'views/report_screen.dart';
 import 'views/home_screen.dart';
@@ -41,6 +45,9 @@ class InventarioApp extends StatelessWidget {
         Provider.value(value: erpNextService),
         ChangeNotifierProvider(
           create: (_) => InventoryProvider(erpNextService: erpNextService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => LabelProvider(erpNextService: erpNextService),
         ),
         ChangeNotifierProvider(
           create: (_) => PurchaseOrderProvider(erpNextService: erpNextService),
@@ -84,8 +91,11 @@ class InventarioApp extends StatelessWidget {
         routes: {
           '/home': (_) => const HomeScreen(),
           '/config': (_) => const ConfigScreen(),
+          '/login': (_) => const LoginScreen(),
+          '/label-designer': (_) => const LabelDesignerScreen(),
           '/excel': (_) => const ExcelUploadScreen(),
           '/scanner': (_) => const ScannerScreen(),
+          '/labels': (_) => const LabelScreen(),
           '/report': (_) => const ReportScreen(),
           '/po-list': (_) => const PurchaseOrderListScreen(),
           '/po-create': (_) => const PurchaseOrderDetailScreen(),

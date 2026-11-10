@@ -1286,7 +1286,7 @@ class ErpNextService {
   }) async {
     final doc = {
       'bill_no': ?billNo,
-      if (updateStock != null) 'update_stock': updateStock,
+      'update_stock': ?updateStock,
       'items': items
           .map(
             (item) => {
@@ -2018,7 +2018,7 @@ class ErpNextService {
   }) async {
     final doc = {
       'stock_entry_type': stockEntryType,
-      if (sourceWarehouse != null) 'from_warehouse': sourceWarehouse,
+      'from_warehouse': ?sourceWarehouse,
       // Header del Stock Entry usa 'to_warehouse', no 't_warehouse'.
       'to_warehouse': ?targetWarehouse,
       'remarks': ?remarks,
@@ -2077,5 +2077,186 @@ class ErpNextService {
   /// Obtiene las naming_series disponibles para Stock Entry.
   Future<List<String>> fetchStockEntryNamingSeries() async {
     return await fetchNamingSeries('Stock Entry');
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // ETIQUETAS DE PRECIO (módulo etiquetas)
+  // ══════════════════════════════════════════════════════════════
+
+  /// Lista las listas de precios activas (para el selector de configuración).
+  Future<List<String>> fetchPriceLists() async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Price List',
+          'fields': '["name","currency"]',
+          'filters': '[["enabled","=",1],["selling","=",1]]',
+          'limit_page_length': 0,
+        },
+      );
+      if (response.statusCode != 200) return [];
+      final List<dynamic> rows = response.data?['message'] ?? [];
+      final lists = rows
+          .map((r) => (r['name'] ?? '').toString())
+          .where((n) => n.isNotEmpty)
+          .toList()
+        ..sort();
+      return lists;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Trae el precio de venta de un item en una lista de precios (Item Price).
+  /// Retorna null si el item no tiene precio en esa lista.
+  Future<double?> fetchItemPrice({
+    required String itemCode,
+    required String priceList,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'Item Price',
+          'fields': '["price_list_rate"]',
+          'filters':
+              '[["item_code","=","$itemCode"],["price_list","=","$priceList"],["selling","=",1]]',
+          'limit_page_length': 1,
+          'order_by': 'valid_from desc, modified desc',
+        },
+      );
+      if (response.statusCode != 200) return null;
+      final List<dynamic> rows = response.data?['message'] ?? [];
+      if (rows.isEmpty) return null;
+      final rate = rows[0]['price_list_rate'];
+      if (rate is num) return rate.toDouble();
+      return double.tryParse(rate.toString());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Trae los precios de varios items de golpe (Item Price) en la lista dada.
+  /// Retorna mapa item_code → precio. Los items sin precio no aparecen.
+  Future<Map<String, double>> fetchItemPrices({
+    required List<String> itemCodes,
+    required String priceList,
+  }) async {
+    final result = <String, double>{};
+    if (itemCodes.isEmpty || priceList.isEmpty) return result;
+    try {
+      // En chunks de 50 para no pasarnos del largo de la URL.
+      for (var i = 0; i < itemCodes.length; i += 50) {
+        final chunk = itemCodes.skip(i).take(50).toList();
+        final codesJson = chunk
+            .map((c) => '"${c.replaceAll('"', '')}"')
+            .join(',');
+        final response = await _dio.get(
+          '$baseUrl/api/method/frappe.client.get_list',
+          queryParameters: {
+            'doctype': 'Item Price',
+            'fields': '["item_code","price_list_rate"]',
+            'filters':
+                '[["item_code","in",[$codesJson]],["price_list","=","$priceList"],["selling","=",1]]',
+            'limit_page_length': 0,
+          },
+        );
+        if (response.statusCode != 200) continue;
+        final List<dynamic> rows = response.data?['message'] ?? [];
+        for (final row in rows) {
+          final code = (row['item_code'] ?? '').toString().toUpperCase();
+          final rate = row['price_list_rate'];
+          if (code.isNotEmpty && rate is num) {
+            result[code] = rate.toDouble();
+          }
+        }
+      }
+    } catch (_) {}
+    return result;
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // PLANTILLA DE ETIQUETAS (sincronizada como File JSON en el ERP)
+  //
+  // El diseño vive en el ERP (un File con nombre fijo) para que todos
+  // los dispositivos usen la misma plantilla. No requiere doctype nuevo
+  // ni permisos de admin: cualquier usuario con sesión puede subir /
+  // descargar el archivo.
+  // ══════════════════════════════════════════════════════════════
+
+  static const String labelTemplateFileName = 'scanzapp_label_template.json';
+  static const String labelTemplateFolder = 'Home';
+
+  /// Busca el File de la plantilla y retorna su name, o null si no existe.
+  Future<String?> _findLabelTemplateFile() async {
+    try {
+      final res = await _dio.get(
+        '$baseUrl/api/method/frappe.client.get_list',
+        queryParameters: {
+          'doctype': 'File',
+          'fields': '["name"]',
+          'filters':
+              '[["file_name","=","$labelTemplateFileName"],["is_folder","=",0]]',
+          'order_by': 'creation desc',
+          'limit_page_length': 1,
+        },
+      );
+      if (res.statusCode != 200) return null;
+      final rows = res.data?['message'];
+      if (rows is! List || rows.isEmpty) return null;
+      final name = rows.first['name']?.toString() ?? '';
+      return name.isEmpty ? null : name;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Descarga la plantilla de etiquetas del ERP.
+  /// Retorna el JSON como String, o null si todavía no existe en el ERP.
+  Future<String?> fetchLabelTemplate() async {
+    final name = await _findLabelTemplateFile();
+    if (name == null) return null;
+    try {
+      final res = await _dio.get(
+        '$baseUrl/api/resource/File/${Uri.encodeComponent(name)}',
+        queryParameters: {'fields': '["content"]'},
+      );
+      if (res.statusCode != 200) return null;
+      final data = res.data?['data'];
+      final content = data is Map ? data['content'] : null;
+      if (content is String && content.trim().isNotEmpty) return content;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Sube (o actualiza, sin duplicar) la plantilla de etiquetas al ERP.
+  Future<void> uploadLabelTemplate(String jsonStr) async {
+    final existing = await _findLabelTemplateFile();
+    if (existing != null) {
+      final res = await _dio.put(
+        '$baseUrl/api/resource/File/${Uri.encodeComponent(existing)}',
+        data: {'content': jsonStr},
+      );
+      if (res.statusCode == 200) return;
+      throw Exception(
+          'No se pudo actualizar la plantilla en el ERP (${res.statusCode})');
+    }
+    final res = await _dio.post(
+      '$baseUrl/api/resource/File',
+      data: {
+        'doctype': 'File',
+        'file_name': labelTemplateFileName,
+        'folder': labelTemplateFolder,
+        'is_private': 0,
+        'content': jsonStr,
+      },
+    );
+    if (res.statusCode != 200) {
+      throw Exception(
+          'No se pudo subir la plantilla al ERP (${res.statusCode})');
+    }
   }
 }

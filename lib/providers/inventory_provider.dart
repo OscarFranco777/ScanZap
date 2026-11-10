@@ -238,6 +238,40 @@ class InventoryProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Resuelve un código escaneado a un ItemModel usando SOLO los mapas
+  /// locales (item_code, nombre y multi-barcode con leading zeros).
+  /// Sin efectos secundarios ni llamadas de red — para módulos que necesitan
+  /// resolver sin alterar la sesión de conteo. Retorna null si no está local.
+  ItemModel? resolveBarcodeLocal(String code) {
+    final cleanCode = code.trim();
+    if (cleanCode.isEmpty) return null;
+
+    final strippedCode = cleanCode.replaceFirst(RegExp(r'^0+'), '');
+    final upperCode = cleanCode.toUpperCase();
+    final upperStripped = strippedCode.toUpperCase();
+
+    var item = itemsByCode[upperCode];
+    if (item == null && upperStripped != upperCode) {
+      item = itemsByCode[upperStripped];
+    }
+
+    if (item == null) {
+      var resolvedCode = barcodesToItemCode[upperCode];
+      if (resolvedCode == null && upperStripped != upperCode) {
+        resolvedCode = barcodesToItemCode[upperStripped];
+      }
+      if (resolvedCode != null) {
+        item = itemsByCode[resolvedCode];
+        if (item == null) {
+          final strippedResolved = resolvedCode.replaceFirst(RegExp(r'^0+'), '');
+          item = itemsByCode[strippedResolved];
+        }
+      }
+    }
+
+    return item;
+  }
+
   // ══════════════════════════════════════════════════════════════
   // ESCANEO Y CONTEO
   // ══════════════════════════════════════════════════════════════
