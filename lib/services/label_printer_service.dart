@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:image/image.dart' as img;
 
 import '../models/label_settings.dart';
@@ -58,6 +59,28 @@ class LabelPrinterService {
     try {
       final state = await FlutterBluetoothSerial.instance.state;
       return state == BluetoothState.STATE_ON;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Garantiza que el Bluetooth esté usable: primero pide el permiso
+  /// runtime BLUETOOTH_CONNECT (obligatorio en Android 12+ — sin él el
+  /// plugin lanza SecurityException NATIVA y tumba la app), y luego
+  /// opcionalmente pide encender el BT con el diálogo del sistema.
+  Future<bool> ensureBluetoothReady({bool promptEnable = false}) async {
+    if (!isSupported) return false;
+    try {
+      var granted = await Permission.bluetoothConnect.isGranted;
+      if (!granted) {
+        granted = await Permission.bluetoothConnect.request().isGranted;
+      }
+      if (!granted) return false;
+      var on = await isBluetoothEnabled;
+      if (!on && promptEnable) {
+        on = await requestEnable();
+      }
+      return on;
     } catch (_) {
       return false;
     }

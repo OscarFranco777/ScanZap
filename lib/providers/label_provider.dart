@@ -63,8 +63,12 @@ class LabelProvider with ChangeNotifier {
   bool btLoading = false;
 
   /// Refresca el estado de Bluetooth y la lista de impresoras emparejadas.
-  /// Pide encender el BT si está apagado.
-  Future<void> refreshBluetooth() async {
+  /// Pide el permiso runtime BLUETOOTH_CONNECT (Android 12+) ANTES de
+  /// tocar el plugin — sin él el plugin revienta a nivel nativo.
+  /// [promptEnable]: solo en llamada explícita del usuario (botón
+  /// refrescar); nunca al abrir una pantalla (el diálogo del sistema
+  /// de encender BT no debe aparecer solo).
+  Future<void> refreshBluetooth({bool promptEnable = false}) async {
     if (btLoading) return;
     btLoading = true;
     notifyListeners();
@@ -76,10 +80,9 @@ class LabelProvider with ChangeNotifier {
       return;
     }
 
-    btEnabled = await printerService.isBluetoothEnabled;
-    if (!btEnabled) {
-      btEnabled = await printerService.requestEnable();
-    }
+    btEnabled = await printerService.ensureBluetoothReady(
+      promptEnable: promptEnable,
+    );
     if (btEnabled) {
       btDevices = await printerService.listBondedDevices();
     }

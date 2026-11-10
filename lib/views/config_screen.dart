@@ -8,8 +8,8 @@ import '../services/label_printer_service.dart';
 import '../theme/app_design.dart';
 
 /// Pantalla de configuración de la app.
-/// Arriba: botón de Iniciar sesión (lleva a la pantalla de login).
-/// Abajo: las configuraciones — Permisos del usuario y Etiquetas de Precio.
+/// Solo configuraciones — Permisos del usuario y Etiquetas de Precio.
+/// El inicio de sesión vive aparte (pantalla /login desde el home).
 class ConfigScreen extends StatefulWidget {
   const ConfigScreen({super.key});
 
@@ -41,11 +41,18 @@ class _ConfigScreenState extends State<ConfigScreen> {
   /// Carga la configuración del módulo de Etiquetas de Precio (vive acá
   /// junto al resto de la configuración de la app).
   Future<void> _initLabelConfig() async {
-    final lp = context.read<LabelProvider>();
-    await lp.loadSettings();
-    await lp.loadTemplate();
-    if (lp.priceLists.isEmpty) lp.loadPriceLists();
-    await lp.refreshBluetooth();
+    try {
+      final lp = context.read<LabelProvider>();
+      await lp.loadSettings();
+      await lp.loadTemplate();
+      if (lp.priceLists.isEmpty) lp.loadPriceLists();
+      // Sin promptEnable: abrir Configuración NO debe lanzar el diálogo
+      // del sistema de encender Bluetooth (y el permiso runtime ya se
+      // pide dentro de refreshBluetooth).
+      await lp.refreshBluetooth();
+    } catch (_) {
+      // La configuración no debe tumbar la app por nada que falle acá.
+    }
   }
 
   /// Valida que el usuario tenga acceso de lectura a los registros clave
@@ -86,8 +93,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
   @override
   Widget build(BuildContext context) {
     final bg = AppDesign.bg;
-    final connected = context.watch<InventoryProvider>().isConnected;
-    final user = context.read<InventoryProvider>().erpNextService.loggedUser;
 
     return Scaffold(
       backgroundColor: bg,
@@ -98,71 +103,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ─── Iniciar sesión ───
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.vpn_key_outlined,
-                        size: 20, color: AppDesign.navy),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Sesión de ERPNext',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      connected && user.isNotEmpty
-                          ? '🟢 $user'
-                          : '🔴 Sin sesión',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: connected ? Colors.green[700] : Colors.red[700],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton.icon(
-                    onPressed: () async {
-                      await Navigator.pushNamed(context, '/login');
-                      if (mounted) setState(() {});
-                    },
-                    icon: const Icon(Icons.login),
-                    label: const Text(
-                      'Iniciar sesión',
-                      style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w800),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppDesign.navy,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
           // ─── Permisos del usuario ───
           _buildPermisosCard(),
           const SizedBox(height: 16),
@@ -528,7 +468,10 @@ class _ConfigScreenState extends State<ConfigScreen> {
       return const LinearProgressIndicator(minHeight: 2);
     }
     if (!lp.btEnabled) {
-      return _labelInfo('⚠️ Bluetooth apagado o no disponible. Tocá refrescar.');
+      return _labelInfo(
+        '⚠️ Bluetooth apagado o sin permiso. Tocá refrescar: la app pedirá '
+        'el permiso de Bluetooth y/o encenderlo.',
+      );
     }
     final macs = lp.btDevices.map((d) => d.address).toSet().toList();
     final currentMac = lp.settings.printerMac;
@@ -545,7 +488,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
             'Ajustes → Bluetooth y tocá refrescar.',
           ),
           TextButton.icon(
-            onPressed: lp.refreshBluetooth,
+            onPressed: () => lp.refreshBluetooth(promptEnable: true),
             icon: const Icon(Icons.refresh, size: 18),
             label: const Text('Refrescar'),
           ),
@@ -562,7 +505,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         isDense: true,
         suffixIcon: IconButton(
           icon: const Icon(Icons.refresh, size: 20),
-          onPressed: lp.refreshBluetooth,
+          onPressed: () => lp.refreshBluetooth(promptEnable: true),
         ),
       ),
       items: macs.map((mac) {
